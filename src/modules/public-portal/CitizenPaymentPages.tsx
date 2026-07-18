@@ -1,0 +1,62 @@
+"use client";
+
+import { useState } from "react";
+import { Alert, Box, Button, Checkbox, Container, Dialog, DialogActions, DialogContent, DialogTitle, Divider, FormControlLabel, Grid, LinearProgress, Paper, Stack, TextField, Typography } from "@mui/material";
+import AccountBalanceWalletRoundedIcon from "@mui/icons-material/AccountBalanceWalletRounded";
+import ArrowForwardRoundedIcon from "@mui/icons-material/ArrowForwardRounded";
+import CheckCircleRoundedIcon from "@mui/icons-material/CheckCircleRounded";
+import DescriptionRoundedIcon from "@mui/icons-material/DescriptionRounded";
+import FactCheckRoundedIcon from "@mui/icons-material/FactCheckRounded";
+import LockOutlinedIcon from "@mui/icons-material/LockOutlined";
+import PaymentsRoundedIcon from "@mui/icons-material/PaymentsRounded";
+import ReceiptLongRoundedIcon from "@mui/icons-material/ReceiptLongRounded";
+import SearchRoundedIcon from "@mui/icons-material/SearchRounded";
+import VerifiedRoundedIcon from "@mui/icons-material/VerifiedRounded";
+import { Link } from "react-router-dom";
+import { BusyButton, EmptyState, StatusChip, maskPlate, maskTicket, money, readableError } from "@/src/components/common";
+import { useApp } from "@/src/contexts/AppContext";
+import type { Payment } from "@/src/types";
+
+const PUBLIC_LOOKUP_KEY = "pmt-last-public-lookup";
+
+const services = [
+  { title: "Consultar multa", description: "Revisa estado, monto y saldo usando boleta y placa.", to: "/consulta", action: "Consultar ahora", icon: <SearchRoundedIcon /> },
+  { title: "Pagos y recibos", description: "Genera tu orden y confirma si el pago ya fue aplicado.", to: "/pagos", action: "Ir a pagos", icon: <PaymentsRoundedIcon /> },
+  { title: "Solicitar solvencia", description: "Comprueba requisitos y solicita el documento cuando todo esté pagado.", to: "/solvencia/solicitar", action: "Ver requisitos", icon: <DescriptionRoundedIcon /> },
+  { title: "Verificar solvencia", description: "Valida la autenticidad y vigencia mediante su código.", to: "/verificar-solvencia", action: "Verificar documento", icon: <VerifiedRoundedIcon /> },
+];
+
+export function CitizenServiceHub() {
+  return <Container maxWidth="xl" component="section" className="citizen-services"><Box className="section-heading"><Typography className="overline">Servicios en línea</Typography><Typography variant="h3">Todo tu trámite ciudadano en un mismo portal.</Typography><Typography color="text.secondary">Consulta sin crear una cuenta. Para proteger tus datos, algunos servicios solicitan la boleta y la placa.</Typography></Box><Grid container spacing={2}>{services.map((service) => <Grid size={{ xs: 12, sm: 6, lg: 3 }} key={service.title}><Paper variant="outlined" className={`citizen-service-card ${service.to === "/pagos" ? "featured" : ""}`}><Box className="citizen-service-icon">{service.icon}</Box><Typography variant="h6">{service.title}</Typography><Typography color="text.secondary">{service.description}</Typography><Button component={Link} to={service.to} endIcon={<ArrowForwardRoundedIcon />}>{service.action}</Button></Paper></Grid>)}</Grid></Container>;
+}
+
+function maskedReceipt(receipt: string) {
+  return `••••-${receipt.slice(-4)}`;
+}
+
+export function CitizenPaymentsPage() {
+  const { infractions, payments, publicLookup } = useApp();
+  const [selectedId, setSelectedId] = useState(() => typeof window === "undefined" ? "" : window.sessionStorage.getItem(PUBLIC_LOOKUP_KEY) ?? "");
+  const [ticket, setTicket] = useState("2026-001279"); const [plate, setPlate] = useState("C456DPR"); const [captcha, setCaptcha] = useState(""); const [accepted, setAccepted] = useState(false); const [busy, setBusy] = useState(false); const [error, setError] = useState(""); const [receipt, setReceipt] = useState<Payment | null>(null);
+  const item = infractions.find((row) => row.id === selectedId) ?? null;
+  const relatedPayments = item ? payments.filter((row) => row.infractionId === item.id && row.status === "CONFIRMADO") : [];
+  const balance = item ? Math.max(0, item.amount - item.paidAmount) : 0;
+
+  function loadDemo(kind: "pending" | "paid") {
+    if (kind === "pending") { setTicket("2026-001279"); setPlate("C456DPR"); }
+    else { setTicket("2026-001243"); setPlate("C622GRT"); }
+    setSelectedId(""); setError(""); setReceipt(null);
+  }
+
+  async function submit(event: React.FormEvent) {
+    event.preventDefault(); setError(""); setReceipt(null);
+    if (captcha.trim() !== "10") return setError("La respuesta del CAPTCHA no es correcta.");
+    if (!accepted) return setError("Debes aceptar los términos de consulta.");
+    setBusy(true);
+    try { const found = await publicLookup(ticket, plate); window.sessionStorage.setItem(PUBLIC_LOOKUP_KEY, found.id); setSelectedId(found.id); }
+    catch (reason) { setError(readableError(reason)); }
+    finally { setBusy(false); }
+  }
+
+  return <Container maxWidth="xl" className="public-page payment-center"><Box className="section-heading"><Typography className="overline">Pagos y recibos</Typography><Typography variant="h2">Centro de pagos ciudadano</Typography><Typography color="text.secondary">Genera tu orden, revisa cuánto debes y confirma si receptoría ya aplicó tu recibo municipal.</Typography></Box><Alert severity="info" className="payment-policy-alert"><strong>El pago no se realiza en línea en esta etapa.</strong> Debes pagar presencialmente en receptoría. Este portal sirve para preparar la orden y consultar la aplicación del pago.</Alert><Grid container spacing={2.5}><Grid size={{ xs: 12, lg: 5 }}><Paper variant="outlined" className="public-form-card payment-lookup-card">{busy && <LinearProgress />}<Box className="card-title-row"><Box><Typography className="overline">Consulta segura</Typography><Typography variant="h6">Busca tu expediente</Typography></Box><LockOutlinedIcon /></Box><form onSubmit={submit}><Stack spacing={2}><TextField label="Número de boleta" value={ticket} onChange={(event) => setTicket(event.target.value.trimStart())} required helperText="Ejemplo: 2026-001279" /><TextField label="Placa del vehículo" value={plate} onChange={(event) => setPlate(event.target.value.replace(/\s+/g, "").toUpperCase())} required helperText="Sin espacios" /><Box className="captcha-box"><Box><Typography>CAPTCHA de demostración</Typography><Typography variant="h5">4 + 6 = ?</Typography></Box><TextField label="Respuesta" value={captcha} onChange={(event) => setCaptcha(event.target.value)} inputMode="numeric" /></Box><FormControlLabel control={<Checkbox checked={accepted} onChange={(event) => setAccepted(event.target.checked)} />} label="Acepto los términos para consultar el estado financiero de la boleta." />{error && <Alert severity="error">{error}</Alert>}<BusyButton busy={busy} type="submit" variant="contained" size="large" startIcon={<SearchRoundedIcon />}>Consultar saldo y pagos</BusyButton></Stack></form><Divider /><Typography className="demo-label">ESCENARIOS DE DEMOSTRACIÓN</Typography><Stack direction={{ xs: "column", sm: "row" }} spacing={1}><Button size="small" variant="outlined" onClick={() => loadDemo("pending")}>Con saldo pendiente</Button><Button size="small" variant="outlined" onClick={() => loadDemo("paid")}>Con pago registrado</Button></Stack></Paper></Grid><Grid size={{ xs: 12, lg: 7 }}>{item ? <Stack spacing={2}><Paper variant="outlined" className="citizen-payment-summary"><Box className="payment-summary-heading"><Box><Typography className="overline">Resumen de la cuenta</Typography><Typography variant="h4">Boleta {maskTicket(item.ticket)}</Typography><Typography color="text.secondary">Placa {maskPlate(item.plate)}</Typography></Box><StatusChip status={item.financialStatus} size="medium" /></Box><Grid container spacing={1.5}><Grid size={{ xs: 12, sm: 4 }}><Box className="payment-amount-box"><Typography>Monto original</Typography><Typography variant="h6">{money(item.amount)}</Typography></Box></Grid><Grid size={{ xs: 12, sm: 4 }}><Box className="payment-amount-box"><Typography>Total pagado</Typography><Typography variant="h6">{money(item.paidAmount)}</Typography></Box></Grid><Grid size={{ xs: 12, sm: 4 }}><Box className={`payment-amount-box ${balance ? "due" : "paid"}`}><Typography>Saldo pendiente</Typography><Typography variant="h6">{money(balance)}</Typography></Box></Grid></Grid>{balance > 0 ? <Alert severity="warning">Tienes saldo pendiente. Genera la orden y preséntala en receptoría municipal.</Alert> : <Alert severity="success" icon={<CheckCircleRoundedIcon />}>La multa aparece pagada. Revisa también la tarifa de solvencia antes de solicitar el documento.</Alert>}<Stack direction={{ xs: "column", sm: "row" }} spacing={1}><Button variant="contained" component={Link} to={`/orden-pago/OP-${item.ticket}`} startIcon={<ReceiptLongRoundedIcon />}>{balance > 0 ? "Generar orden de pago" : "Ver orden y conceptos"}</Button><Button variant="outlined" component={Link} to="/consulta/resultado">Ver expediente público</Button></Stack></Paper><Paper variant="outlined" className="public-payment-history"><Box className="card-title-row"><Box><Typography className="overline">Comprobantes aplicados</Typography><Typography variant="h6">Historial de pagos</Typography></Box><StatusChip status={relatedPayments.length ? "CONFIRMADO" : "PENDIENTE"} /></Box>{relatedPayments.length ? <Stack divider={<Divider />}>{relatedPayments.map((payment) => <Box className="citizen-receipt-row" key={payment.id}><Box className="receipt-icon"><FactCheckRoundedIcon /></Box><Box><Typography><strong>{maskedReceipt(payment.receiptNumber)}</strong></Typography><Typography component="small">{payment.concept === "MULTA" ? "Pago de multa" : "Tarifa de solvencia"} · {new Date(payment.createdAt).toLocaleDateString("es-GT")}</Typography></Box><Typography><strong>{money(payment.amount)}</strong></Typography><Button size="small" onClick={() => setReceipt(payment)}>Ver comprobante</Button></Box>)}</Stack> : <EmptyState title="Aún no hay pagos aplicados" description="Si ya pagaste, receptoría debe registrar el recibo para que aparezca en este portal." />}<Box className="unreflected-payment"><Typography><strong>¿Tu pago todavía no aparece?</strong></Typography><Typography color="text.secondary">Conserva el recibo original y solicita revisión en receptoría.</Typography><Button component={Link} to="/ayuda">Reportar pago no reflejado</Button></Box></Paper></Stack> : <Paper variant="outlined" className="payment-empty-guide"><AccountBalanceWalletRoundedIcon /><Typography variant="h4">Consulta antes de pagar</Typography><Typography color="text.secondary">Aquí verás el saldo exacto, la orden que debes presentar y los recibos aplicados al expediente.</Typography><Box className="payment-guide-steps">{[["1", "Consulta", "Ingresa boleta y placa."], ["2", "Genera", "Imprime tu orden de pago."], ["3", "Paga", "Acude a receptoría municipal."], ["4", "Confirma", "Verifica aquí el recibo aplicado."]].map(([number, title, text]) => <Box key={number}><Typography>{number}</Typography><Box><Typography><strong>{title}</strong></Typography><Typography color="text.secondary">{text}</Typography></Box></Box>)}</Box></Paper>}</Grid></Grid><Paper variant="outlined" className="payment-location-card"><Box className="payment-location-icon"><PaymentsRoundedIcon /></Box><Box><Typography className="overline">Lugar de pago</Typography><Typography variant="h6">Receptoría municipal</Typography><Typography color="text.secondary">Edificio municipal · lunes a viernes, de 8:00 a 16:00. Presenta tu orden de pago y solicita tu recibo municipal.</Typography></Box><Button component={Link} to="/requisitos">Ver requisitos</Button></Paper><Dialog open={Boolean(receipt)} onClose={() => setReceipt(null)} fullWidth maxWidth="xs"><DialogTitle>Comprobante aplicado</DialogTitle><DialogContent>{receipt && <Stack spacing={1.5}><Alert severity="success">Pago confirmado por receptoría.</Alert><Box className="receipt-detail"><Typography><span>Recibo</span><strong>{maskedReceipt(receipt.receiptNumber)}</strong></Typography><Typography><span>Concepto</span><strong>{receipt.concept === "MULTA" ? "Pago de multa" : "Tarifa de solvencia"}</strong></Typography><Typography><span>Monto</span><strong>{money(receipt.amount)}</strong></Typography><Typography><span>Fecha</span><strong>{new Date(receipt.createdAt).toLocaleString("es-GT")}</strong></Typography><Typography><span>Estado</span><StatusChip status={receipt.status} /></Typography></Box></Stack>}</DialogContent><DialogActions><Button onClick={() => setReceipt(null)}>Cerrar</Button></DialogActions></Dialog></Container>;
+}
