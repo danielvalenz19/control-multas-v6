@@ -13,22 +13,11 @@ import { AppProvider } from "@/src/contexts/AppContext";
 import { theme } from "@/src/app/theme";
 import PublicLayout from "@/src/layouts/PublicLayout";
 import AdminLayout from "@/src/layouts/AdminLayout";
-import {
-  InformationPage,
-  PublicHome,
-  PublicLookup,
-  SolvencyDocumentPage,
-} from "@/src/modules/public-portal/PublicPages";
-import { CitizenPaymentsPage } from "@/src/modules/public-portal/CitizenPaymentPages";
-import {
-  CitizenPaymentOrderPage,
-  CitizenPublicResultPage,
-  CitizenSolvencyRequestFlow,
-  CitizenSolvencyTrackingPage,
-  CitizenSolvencyVerifyPage,
-  PaymentOrderAccessPage,
-} from "@/src/modules/public-portal/CitizenServiceFlows";
-import { LoginPage, RecoverPasswordPage } from "@/src/modules/auth/AuthPages";
+import { InformationPage } from "@/src/modules/public-portal/PublicPages";
+import { FutureModulePage, PaymentOrderAccessPage, PaymentOrderPage, PublicHome, PublicLookup, PublicResultPage } from "@/src/modules/public-portal/RealPublicPages";
+import { RecoverPasswordPage } from "@/src/modules/auth/AuthPages";
+import { LoginPage } from "@/src/modules/auth/pages/LoginPage";
+import { AuthProvider } from "@/src/modules/auth/context/AuthProvider";
 import {
   NoPermissionPage,
   PermissionRoute,
@@ -38,9 +27,11 @@ import DashboardPage from "@/src/modules/dashboard/DashboardPage";
 import {
   InfractionDetailPage,
   InfractionsListPage,
+  NewInfractionPage,
   PendingInfractionsPage,
-} from "@/src/modules/infractions/InfractionPages";
+} from "@/src/modules/infractions/RealInfractionPages";
 import {
+  CashControlPage,
   NewPaymentPage,
   PaymentDetailPage,
   ReceptionPage,
@@ -50,23 +41,26 @@ import SolvenciesPage, {
   SolvencyDetailPage,
 } from "@/src/modules/solvencies/SolvenciesPage";
 import {
-  AuditPage,
+  PublicSolvencyRequestInfoPage,
+  PublicSolvencyVerifyPage,
+} from "@/src/modules/solvencies/PublicSolvencyPages";
+import { ProfilePage } from "@/src/modules/management/ManagementPages";
+import SettingsPage from "@/src/modules/management/RealSettingsPage";
+import ReportsPage from "@/src/modules/reports/ReportsPage";
+import NotificationsPage from "@/src/modules/notifications/NotificationsPage";
+import HistoricalMigrationsPage from "@/src/modules/historical-migrations/HistoricalMigrationsPage";
+import {
+  AgentsPage,
   CatalogsPage,
-  ProfilePage,
+  DevicesPage,
   RolesPage,
-  SettingsPage,
   UsersPage,
-} from "@/src/modules/management/ManagementPages";
+} from "@/src/modules/administration/pages/AdministrationPages";
 import {
-  DevicesSyncPage,
-  ReportsCompletePage,
-} from "@/src/modules/management/EnhancedManagementPages";
-import {
-  AppealsPage,
-  CashControlPage,
-  CitizensVehiclesPage,
   WorkQueuePage,
 } from "@/src/modules/operations/OperationalPages";
+import { AppealDetailPage, AppealsPage } from "@/src/modules/appeals/pages/AppealPages";
+import { CitizensVehiclesPage } from "@/src/modules/citizens/pages/CitizensVehiclesPage";
 import type { RoleName } from "@/src/types";
 
 const guards = {
@@ -89,19 +83,22 @@ function ScrollToTop() {
 
 function Allowed({
   roles,
+  permission,
   children,
 }: {
   roles: RoleName[];
+  permission?: string;
   children: React.ReactNode;
 }) {
-  return <PermissionRoute roles={roles}>{children}</PermissionRoute>;
+  return <PermissionRoute roles={roles} permission={permission}>{children}</PermissionRoute>;
 }
 
 export default function App() {
   return (
     <ThemeProvider theme={theme}>
       <CssBaseline />
-      <AppProvider>
+      <AuthProvider>
+        <AppProvider>
         <HashRouter>
           <ScrollToTop />
           <Routes>
@@ -110,33 +107,33 @@ export default function App() {
               <Route path="/consulta" element={<PublicLookup />} />
               <Route
                 path="/consulta/resultado"
-                element={<CitizenPublicResultPage />}
+                element={<PublicResultPage />}
               />
-              <Route path="/pagos" element={<CitizenPaymentsPage />} />
+              <Route path="/pagos" element={<FutureModulePage title="Pagos y recibos" />} />
               <Route path="/orden-pago" element={<PaymentOrderAccessPage />} />
               <Route
-                path="/orden-pago/:codigo"
-                element={<CitizenPaymentOrderPage />}
+                path="/orden-pago/:reference"
+                element={<PaymentOrderPage />}
               />
               <Route
                 path="/solvencia/solicitar"
-                element={<CitizenSolvencyRequestFlow />}
+                element={<PublicSolvencyRequestInfoPage />}
               />
               <Route
                 path="/solvencia/seguimiento"
-                element={<CitizenSolvencyTrackingPage />}
+                element={<PublicSolvencyVerifyPage />}
               />
               <Route
                 path="/solvencia/seguimiento/:codigo"
-                element={<CitizenSolvencyTrackingPage />}
+                element={<PublicSolvencyVerifyPage />}
               />
               <Route
                 path="/solvencia/:codigo"
-                element={<SolvencyDocumentPage />}
+                element={<PublicSolvencyVerifyPage />}
               />
               <Route
                 path="/verificar-solvencia"
-                element={<CitizenSolvencyVerifyPage />}
+                element={<PublicSolvencyVerifyPage />}
               />
               <Route
                 path="/requisitos"
@@ -166,7 +163,7 @@ export default function App() {
               <Route
                 path="dashboard"
                 element={
-                  <Allowed roles={guards.adminSupervisor}>
+                  <Allowed roles={guards.adminSupervisor} permission="dashboard.read">
                     <DashboardPage />
                   </Allowed>
                 }
@@ -174,7 +171,7 @@ export default function App() {
               <Route
                 path="bandeja"
                 element={
-                  <Allowed roles={guards.all}>
+                  <Allowed roles={guards.all} permission="work_queue.read">
                     <WorkQueuePage />
                   </Allowed>
                 }
@@ -182,7 +179,7 @@ export default function App() {
               <Route
                 path="infracciones"
                 element={
-                  <Allowed roles={guards.infractions}>
+                  <Allowed roles={guards.infractions} permission="infractions.read">
                     <InfractionsListPage />
                   </Allowed>
                 }
@@ -190,15 +187,23 @@ export default function App() {
               <Route
                 path="infracciones/pendientes"
                 element={
-                  <Allowed roles={guards.validation}>
+                  <Allowed roles={guards.validation} permission="infractions.validate">
                     <PendingInfractionsPage />
+                  </Allowed>
+                }
+              />
+              <Route
+                path="infracciones/nueva"
+                element={
+                  <Allowed roles={guards.infractions} permission="infractions.create">
+                    <NewInfractionPage />
                   </Allowed>
                 }
               />
               <Route
                 path="infracciones/:id"
                 element={
-                  <Allowed roles={guards.infractions}>
+                  <Allowed roles={guards.infractions} permission="infractions.read">
                     <InfractionDetailPage />
                   </Allowed>
                 }
@@ -206,7 +211,7 @@ export default function App() {
               <Route
                 path="ciudadanos"
                 element={
-                  <Allowed roles={guards.infractions}>
+                  <Allowed roles={guards.infractions} permission="citizens.read_restricted">
                     <CitizensVehiclesPage />
                   </Allowed>
                 }
@@ -270,8 +275,16 @@ export default function App() {
               <Route
                 path="impugnaciones"
                 element={
-                  <Allowed roles={guards.infractions}>
+                  <Allowed roles={guards.infractions} permission="appeals.read">
                     <AppealsPage />
+                  </Allowed>
+                }
+              />
+              <Route
+                path="impugnaciones/:id"
+                element={
+                  <Allowed roles={guards.infractions} permission="appeals.read">
+                    <AppealDetailPage />
                   </Allowed>
                 }
               />
@@ -279,14 +292,14 @@ export default function App() {
                 path="reportes"
                 element={
                   <Allowed roles={guards.adminSupervisor}>
-                    <ReportsCompletePage />
+                    <ReportsPage />
                   </Allowed>
                 }
               />
               <Route
                 path="usuarios"
                 element={
-                  <Allowed roles={guards.admin}>
+                  <Allowed roles={guards.admin} permission="users.read">
                     <UsersPage />
                   </Allowed>
                 }
@@ -294,7 +307,7 @@ export default function App() {
               <Route
                 path="roles"
                 element={
-                  <Allowed roles={guards.admin}>
+                  <Allowed roles={guards.admin} permission="roles.read">
                     <RolesPage />
                   </Allowed>
                 }
@@ -302,7 +315,7 @@ export default function App() {
               <Route
                 path="catalogos"
                 element={
-                  <Allowed roles={guards.admin}>
+                  <Allowed roles={guards.admin} permission="catalogs.read">
                     <CatalogsPage />
                   </Allowed>
                 }
@@ -310,8 +323,16 @@ export default function App() {
               <Route
                 path="dispositivos"
                 element={
-                  <Allowed roles={guards.infractions}>
-                    <DevicesSyncPage />
+                  <Allowed roles={guards.infractions} permission="devices.read">
+                    <DevicesPage />
+                  </Allowed>
+                }
+              />
+              <Route
+                path="agentes"
+                element={
+                  <Allowed roles={guards.adminSupervisor} permission="users.read">
+                    <AgentsPage />
                   </Allowed>
                 }
               />
@@ -319,7 +340,7 @@ export default function App() {
                 path="auditoria"
                 element={
                   <Allowed roles={guards.admin}>
-                    <AuditPage />
+                    <ReportsPage initialType="audit" />
                   </Allowed>
                 }
               />
@@ -331,12 +352,15 @@ export default function App() {
                   </Allowed>
                 }
               />
+              <Route path="migraciones-historicas" element={<Allowed roles={guards.admin} permission="historical_migrations.read"><HistoricalMigrationsPage /></Allowed>} />
               <Route path="perfil" element={<ProfilePage />} />
+              <Route path="notificaciones" element={<Allowed roles={guards.all} permission="notifications.read"><NotificationsPage /></Allowed>} />
             </Route>
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </HashRouter>
-      </AppProvider>
+        </AppProvider>
+      </AuthProvider>
     </ThemeProvider>
   );
 }

@@ -1,15 +1,4 @@
-import type { AuditEvent, Infraction, Payment, SolvencyRequest, User } from "@/src/types";
-
-export const DEMO_PASSWORD = "Demo123*";
-
-export const users: User[] = [
-  { id: "u-admin", name: "Daniel Valenzuela", email: "admin@pmt.demo", role: "ADMIN", roleLabel: "Administrador", dependency: "Administración", enabled: true, lastAccess: "Ahora" },
-  { id: "u-super", name: "Marta Ramírez", email: "supervisor@pmt.demo", role: "SUPERVISOR", roleLabel: "Supervisor", dependency: "Dirección PMT", enabled: true, lastAccess: "Hace 8 min" },
-  { id: "u-pmt", name: "Laura Méndez", email: "operador@pmt.demo", role: "PMT", roleLabel: "Operador PMT", dependency: "Validación", enabled: true, lastAccess: "Hace 13 min" },
-  { id: "u-caja", name: "José Castillo", email: "receptoria@pmt.demo", role: "RECEPTORIA", roleLabel: "Receptoría", dependency: "Caja municipal", enabled: true, lastAccess: "Hace 21 min" },
-  { id: "u-solv", name: "Ana Morales", email: "solvencias@pmt.demo", role: "SOLVENCIAS", roleLabel: "Emisor de solvencias", dependency: "Secretaría", enabled: true, lastAccess: "Hoy, 08:14" },
-  { id: "u-off", name: "Edgar Alvarado", email: "edgar@pmt.demo", role: "PMT", roleLabel: "Agente PMT", dependency: "Operaciones", enabled: false, lastAccess: "12 jul 2026" },
-];
+import type { AuditEvent, Infraction, Payment, SolvencyRequest } from "@/src/types";
 
 const baseInfractions: Infraction[] = [
   {
@@ -102,7 +91,7 @@ export const auditEvents: AuditEvent[] = [
   { id: "aud-1", date: "2026-07-14T10:42:18-06:00", user: "Daniel Valenzuela", role: "Administrador", action: "PAYMENT_CREATE", module: "Pagos", record: "REC-2026-04821", result: "EXITOSO", ip: "172.16.0.24", device: "Chrome · Municipalidad", newValue: "Pago confirmado" },
   { id: "aud-2", date: "2026-07-14T10:38:04-06:00", user: "Laura Méndez", role: "Operador PMT", action: "INFRACTION_VALIDATE", module: "Infracciones", record: "2026-001279", result: "EXITOSO", ip: "172.16.0.18", device: "Chrome · PMT", previousValue: "PENDIENTE_VALIDACION", newValue: "VALIDADA" },
   { id: "aud-3", date: "2026-07-14T10:31:52-06:00", user: "José Castillo", role: "Receptoría", action: "PAYMENT_REVERSE_REQUEST", module: "Pagos", record: "REC-2026-04817", result: "ALERTA", ip: "172.16.0.31", device: "Edge · Caja 01", reason: "Recibo digitado incorrectamente" },
-  { id: "aud-4", date: "2026-07-14T10:14:46-06:00", user: "Sistema", role: "Sistema", action: "LOGIN_FAILED", module: "Autenticación", record: "edgar@pmt.demo", result: "ALERTA", ip: "190.148.2.41", device: "Dispositivo no reconocido" },
+  { id: "aud-4", date: "2026-07-14T10:14:46-06:00", user: "Sistema", role: "Sistema", action: "LOGIN_FAILED", module: "Autenticación", record: "identificador oculto", result: "ALERTA", ip: "190.148.2.41", device: "Dispositivo no reconocido" },
 ];
 
 export const catalogData = {

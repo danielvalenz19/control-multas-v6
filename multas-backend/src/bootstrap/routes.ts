@@ -1,0 +1,55 @@
+import { Router } from "express";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import swaggerUi from "swagger-ui-express";
+import { parse } from "yaml";
+import type { AppContainer } from "./container.js";
+import { createAuthRouter } from "../modules/auth/http/auth.routes.js";
+import { createSystemRouter } from "../modules/system/http/system.routes.js";
+import { createCitizenRouter } from "../modules/citizens/http/citizen.routes.js";
+import { createVehicleRouter } from "../modules/vehicles/http/vehicle.routes.js";
+import { createAdministrationRouter } from "../modules/administration/http/administration.routes.js";
+import { createAgentRouter } from "../modules/agents/http/agent.routes.js";
+import { createDeviceRouter } from "../modules/devices/http/device.routes.js";
+import { createCatalogRouter } from "../modules/catalogs/http/catalog.routes.js";
+import { createInfractionRouter } from "../modules/infractions/http/infraction.routes.js";
+import { createAppealRouter } from "../modules/appeals/http/appeal.routes.js";
+import { createAdjustmentRouter } from "../modules/adjustments/http/adjustment.routes.js";
+import { createInstitutionalRuleRouter } from "../modules/settings/http/institutional-rule.routes.js";
+import { createPublicRouter } from "../modules/public-portal/http/public.routes.js";
+import { createPaymentRouter } from "../modules/payments/http/payment.routes.js";
+import { createSolvencyRouter } from "../modules/solvencies/http/solvency.routes.js";
+import { HttpError } from "../shared/http/HttpError.js";
+import { createAnalyticsRouter } from "../modules/analytics/http/analytics.routes.js";
+import { createNotificationRouter } from "../modules/notifications/http/notification.routes.js";
+import { createHistoricalMigrationRouter } from "../modules/historical-migrations/http/historical-migration.routes.js";
+
+export function createApiRouter(container: AppContainer): Router {
+  const router = Router();
+  const openApiSource = readFileSync(resolve(process.cwd(), "docs/API_OPENAPI.yaml"), "utf8");
+  const openApiDocument = parse(openApiSource) as Record<string, unknown>;
+  router.get("/openapi.yaml", (_request, response) => response.type("application/yaml").send(openApiSource));
+  router.use("/docs", swaggerUi.serve, swaggerUi.setup(openApiDocument, { explorer: false }));
+  router.use("/system", createSystemRouter(container));
+  router.use("/public", createPublicRouter(container));
+  router.use("/auth", createAuthRouter(container.authController, container.authRepository, container.auditRepository, container.env));
+  router.use("/citizens", createCitizenRouter(container));
+  router.use("/vehicles", createVehicleRouter(container));
+  router.use("/", createAdministrationRouter(container));
+  router.use("/agents", createAgentRouter(container));
+  router.use("/devices", createDeviceRouter(container));
+  router.use("/catalogs", createCatalogRouter(container));
+  router.use("/infractions", createInfractionRouter(container));
+  router.use("/infractions", createAdjustmentRouter(container));
+  router.use("/appeals", createAppealRouter(container));
+  router.use("/institutional-rules", createInstitutionalRuleRouter(container));
+  router.use("/", createPaymentRouter(container));
+  router.use("/solvencies", createSolvencyRouter(container));
+  router.use("/", createAnalyticsRouter(container));
+  router.use("/notifications", createNotificationRouter(container));
+  router.use("/admin/historical-migrations", createHistoricalMigrationRouter(container));
+  router.use((_request, _response, next) => {
+    next(new HttpError({ code: "ROUTE_NOT_FOUND", message: "La ruta solicitada no existe.", statusCode: 404 }));
+  });
+  return router;
+}

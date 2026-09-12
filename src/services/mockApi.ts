@@ -1,9 +1,9 @@
-import { auditEvents as auditSeed, DEMO_PASSWORD, infractions as infractionSeed, payments as paymentSeed, solvencyRequests as solvencySeed, users } from "@/src/mocks/seed";
-import type { ApiError, AuditEvent, Infraction, Payment, RoleName, SolvencyRequest, User } from "@/src/types";
+import { auditEvents as auditSeed, infractions as infractionSeed, payments as paymentSeed, solvencyRequests as solvencySeed } from "@/src/mocks/seed";
+import type { ApiError, AuditEvent, Infraction, Payment, SolvencyRequest, User } from "@/src/types";
 
 const STORAGE_KEY = "pmt-demo-state-v3";
-const SESSION_KEY = "pmt-demo-session-v3";
 const LATENCY = 380;
+export const operationalMocksEnabled = import.meta.env.MODE === "test" || import.meta.env.VITE_USE_MOCKS === "true";
 
 interface PersistedState {
   infractions: Infraction[];
@@ -16,10 +16,12 @@ const clone = <T,>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
 const wait = (ms = LATENCY) => new Promise((resolve) => setTimeout(resolve, ms));
 
 function initialState(): PersistedState {
+  if (!operationalMocksEnabled) return { infractions: [], payments: [], solvencies: [], audit: [] };
   return { infractions: clone(infractionSeed), payments: clone(paymentSeed), solvencies: clone(solvencySeed), audit: clone(auditSeed) };
 }
 
 function readState(): PersistedState {
+  if (!operationalMocksEnabled) return initialState();
   if (typeof window === "undefined") return initialState();
   const stored = window.localStorage.getItem(STORAGE_KEY);
   if (!stored) return initialState();
@@ -27,7 +29,7 @@ function readState(): PersistedState {
 }
 
 function writeState(state: PersistedState) {
-  if (typeof window !== "undefined") window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  if (operationalMocksEnabled && typeof window !== "undefined") window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
 }
 
 function fail(code: string, message: string, field?: string): never {
@@ -37,24 +39,6 @@ function fail(code: string, message: string, field?: string): never {
 function addAudit(state: PersistedState, event: Omit<AuditEvent, "id" | "date" | "ip" | "device">) {
   state.audit.unshift({ ...event, id: `aud-${Date.now()}`, date: new Date().toISOString(), ip: "172.16.0.24", device: "Navegador web · Demo" });
 }
-
-export const authService = {
-  async login(email: string, password: string): Promise<User> {
-    await wait(520);
-    const user = users.find((item) => item.email.toLowerCase() === email.trim().toLowerCase());
-    if (!user || password !== DEMO_PASSWORD) fail("INVALID_CREDENTIALS", "El correo o la contraseña no son correctos.");
-    if (!user.enabled) fail("USER_DISABLED", "Esta cuenta está deshabilitada. Contacta al administrador.");
-    if (typeof window !== "undefined") window.localStorage.setItem(SESSION_KEY, JSON.stringify(user));
-    return clone(user);
-  },
-  current(): User | null {
-    if (typeof window === "undefined") return null;
-    const stored = window.localStorage.getItem(SESSION_KEY);
-    if (!stored) return null;
-    try { return JSON.parse(stored) as User; } catch { return null; }
-  },
-  async logout() { await wait(180); if (typeof window !== "undefined") window.localStorage.removeItem(SESSION_KEY); },
-};
 
 export const dataService = {
   async snapshot() { await wait(); return clone(readState()); },
@@ -117,12 +101,4 @@ export const dataService = {
     addAudit(state, { user: user.name, role: user.roleLabel, action: "SOLVENCY_CANCEL", module: "Solvencias", record: request.solvencyNumber ?? request.id, result: "ALERTA", previousValue: previous, newValue: "ANULADA", reason }); writeState(state);
   },
   resetDemo() { if (typeof window !== "undefined") window.localStorage.removeItem(STORAGE_KEY); },
-};
-
-export const roleHome: Record<RoleName, string> = {
-  ADMIN: "/admin/dashboard",
-  SUPERVISOR: "/admin/dashboard",
-  PMT: "/admin/infracciones/pendientes",
-  RECEPTORIA: "/admin/receptoria",
-  SOLVENCIAS: "/admin/solvencias",
 };

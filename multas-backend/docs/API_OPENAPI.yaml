@@ -1,0 +1,1091 @@
+openapi: 3.1.0
+info:
+  title: PMT Multas API - TANDAS 0–8, 10 y 11
+  version: 1.2.0
+  description: Contrato de autenticación, operación municipal, finanzas, solvencias, analítica, notificaciones y migración histórica controlada.
+servers:
+  - url: /api/v1
+tags:
+  - name: System
+  - name: Auth
+  - name: Citizens
+  - name: Vehicles
+  - name: Administration
+  - name: Catalogs
+  - name: Infractions
+  - name: Evidence
+  - name: Appeals
+  - name: Adjustments
+  - name: Institutional rules
+  - name: Public portal
+  - name: Cash
+  - name: Payments
+  - name: Reconciliations
+  - name: Solvencies
+  - name: Dashboard
+  - name: Reports
+  - name: Notifications
+  - name: Historical migrations
+paths:
+  /system/health:
+    get:
+      tags: [System]
+      summary: Comprueba que el proceso está activo
+      responses:
+        '200': { description: Proceso activo }
+  /system/readiness:
+    get:
+      tags: [System]
+      summary: Comprueba MySQL y el contrato auth
+      responses:
+        '200': { description: Servicio listo }
+        '503': { $ref: '#/components/responses/Error' }
+  /auth/login:
+    post:
+      tags: [Auth]
+      summary: Abre una sesión opaca en cookie HttpOnly
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [identifier, password]
+              properties:
+                identifier: { type: string, maxLength: 191 }
+                password: { type: string, format: password, writeOnly: true }
+      responses:
+        '200':
+          description: Sesión creada; el token existe únicamente en Set-Cookie
+          headers:
+            Set-Cookie: { schema: { type: string } }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }
+        '423': { $ref: '#/components/responses/Error' }
+        '429': { $ref: '#/components/responses/Error' }
+  /auth/me:
+    get:
+      tags: [Auth]
+      security: [{ sessionCookie: [] }]
+      summary: Devuelve el usuario, roles y permisos vigentes
+      responses:
+        '200': { description: Identidad autenticada }
+        '401': { $ref: '#/components/responses/Error' }
+  /auth/logout:
+    post:
+      tags: [Auth]
+      summary: Revoca idempotentemente la sesión indicada por la cookie
+      security: [{ sessionCookie: [] }]
+      responses:
+        '204': { description: Cookie eliminada; operación idempotente }
+  /auth/logout-all:
+    post:
+      tags: [Auth]
+      summary: Revoca todas las sesiones del usuario
+      security: [{ sessionCookie: [] }]
+      responses:
+        '204': { description: Todas las sesiones fueron revocadas }
+        '401': { $ref: '#/components/responses/Error' }
+  /auth/sessions:
+    get:
+      tags: [Auth]
+      summary: Lista sesiones propias sin exponer hashes
+      security: [{ sessionCookie: [] }]
+      responses:
+        '200': { description: Sesiones propias }
+        '401': { $ref: '#/components/responses/Error' }
+  /auth/sessions/{sessionId}:
+    delete:
+      tags: [Auth]
+      summary: Revoca una sesión propia o, con privilegio ADMIN, una ajena
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - in: path
+          name: sessionId
+          required: true
+          schema: { type: string, pattern: '^[0-9]+$' }
+      responses:
+        '204': { description: Sesión revocada }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+  /auth/change-password:
+    post:
+      tags: [Auth]
+      summary: Cambia la contraseña y revoca las otras sesiones
+      security: [{ sessionCookie: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [currentPassword, newPassword]
+              properties:
+                currentPassword: { type: string, format: password, writeOnly: true }
+                newPassword: { type: string, format: password, writeOnly: true, minLength: 12, maxLength: 128 }
+      responses:
+        '204': { description: Contraseña cambiada }
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Error' }
+  /citizens:
+    get:
+      tags: [Citizens]
+      security: [{ sessionCookie: [] }]
+      summary: Lista ciudadanos con búsqueda y paginación
+      responses:
+        '200': { description: Página de ciudadanos; datos sensibles según permiso }
+    post:
+      tags: [Citizens]
+      security: [{ sessionCookie: [] }]
+      summary: Crea un ciudadano
+      responses:
+        '201': { description: Ciudadano creado }
+        '409': { $ref: '#/components/responses/Error' }
+  /citizens/{id}:
+    get:
+      tags: [Citizens]
+      security: [{ sessionCookie: [] }]
+      summary: Consulta un ciudadano
+      responses:
+        '200': { description: Ciudadano }
+    patch:
+      tags: [Citizens]
+      security: [{ sessionCookie: [] }]
+      summary: Actualiza un ciudadano
+      responses:
+        '204': { description: Ciudadano actualizado }
+  /vehicles:
+    get:
+      tags: [Vehicles]
+      security: [{ sessionCookie: [] }]
+      summary: Lista vehículos con búsqueda y paginación
+      responses:
+        '200': { description: Página de vehículos }
+    post:
+      tags: [Vehicles]
+      security: [{ sessionCookie: [] }]
+      summary: Crea un vehículo con placa normalizada única
+      responses:
+        '201': { description: Vehículo creado }
+        '409': { $ref: '#/components/responses/Error' }
+  /vehicles/{id}/ownerships:
+    get:
+      tags: [Vehicles]
+      security: [{ sessionCookie: [] }]
+      summary: Consulta el historial de propietarios
+      responses:
+        '200': { description: Historial cronológico }
+    post:
+      tags: [Vehicles]
+      security: [{ sessionCookie: [] }]
+      summary: Asigna un propietario cuando no existe otro vigente
+      responses:
+        '201': { description: Propiedad creada }
+        '409': { $ref: '#/components/responses/Error' }
+  /users:
+    get:
+      tags: [Administration]
+      security: [{ sessionCookie: [] }]
+      summary: Lista usuarios institucionales con paginación y filtros
+      responses: { '200': { description: Página de usuarios }, '403': { $ref: '#/components/responses/Error' } }
+    post:
+      tags: [Administration]
+      security: [{ sessionCookie: [] }]
+      summary: Crea un usuario con contraseña Argon2id
+      responses: { '201': { description: Usuario creado }, '409': { $ref: '#/components/responses/Error' }, '422': { $ref: '#/components/responses/Error' } }
+  /users/{id}:
+    get:
+      tags: [Administration]
+      security: [{ sessionCookie: [] }]
+      summary: Consulta un usuario sin exponer password_hash
+      responses: { '200': { description: Usuario institucional } }
+    patch:
+      tags: [Administration]
+      security: [{ sessionCookie: [] }]
+      summary: Actualiza datos del usuario
+      responses: { '204': { description: Usuario actualizado }, '409': { $ref: '#/components/responses/Error' } }
+  /users/{id}/roles:
+    put:
+      tags: [Administration]
+      security: [{ sessionCookie: [] }]
+      summary: Reemplaza roles protegiendo al último ADMIN activo
+      responses: { '204': { description: Roles asignados }, '409': { $ref: '#/components/responses/Error' } }
+  /users/{id}/activate:
+    post:
+      tags: [Administration]
+      security: [{ sessionCookie: [] }]
+      summary: Activa un usuario institucional
+      responses: { '204': { description: Usuario activado }, '404': { $ref: '#/components/responses/Error' } }
+  /users/{id}/deactivate:
+    post:
+      tags: [Administration]
+      security: [{ sessionCookie: [] }]
+      summary: Desactiva un usuario, revoca sus sesiones y protege al último ADMIN
+      responses: { '204': { description: Usuario desactivado }, '409': { $ref: '#/components/responses/Error' } }
+  /users/{id}/revoke-sessions:
+    post:
+      tags: [Administration]
+      security: [{ sessionCookie: [] }]
+      summary: Revoca todas las sesiones de un usuario
+      responses: { '204': { description: Sesiones revocadas }, '404': { $ref: '#/components/responses/Error' } }
+  /roles:
+    get:
+      tags: [Administration]
+      security: [{ sessionCookie: [] }]
+      summary: Lista roles y permisos disponibles
+      responses: { '200': { description: Roles y matriz de permisos } }
+    post:
+      tags: [Administration]
+      security: [{ sessionCookie: [] }]
+      summary: Crea un rol institucional
+      responses: { '201': { description: Rol creado }, '409': { $ref: '#/components/responses/Error' } }
+  /roles/{id}:
+    patch:
+      tags: [Administration]
+      security: [{ sessionCookie: [] }]
+      summary: Actualiza un rol institucional
+      responses: { '204': { description: Rol actualizado }, '404': { $ref: '#/components/responses/Error' } }
+  /roles/{id}/permissions:
+    put:
+      tags: [Administration]
+      security: [{ sessionCookie: [] }]
+      summary: Reemplaza atómicamente los permisos asignados al rol
+      responses: { '204': { description: Permisos asignados }, '404': { $ref: '#/components/responses/Error' } }
+  /agents:
+    get:
+      tags: [Administration]
+      security: [{ sessionCookie: [] }]
+      summary: Lista agentes PMT
+      responses: { '200': { description: Página de agentes } }
+    post:
+      tags: [Administration]
+      security: [{ sessionCookie: [] }]
+      summary: Registra un agente único relacionado con un usuario activo
+      responses: { '201': { description: Agente creado }, '409': { $ref: '#/components/responses/Error' } }
+  /agents/{id}:
+    get:
+      tags: [Administration]
+      security: [{ sessionCookie: [] }]
+      summary: Consulta un agente PMT
+      responses: { '200': { description: Agente PMT }, '404': { $ref: '#/components/responses/Error' } }
+    patch:
+      tags: [Administration]
+      security: [{ sessionCookie: [] }]
+      summary: Actualiza la relación operativa de un agente
+      responses: { '204': { description: Agente actualizado }, '409': { $ref: '#/components/responses/Error' } }
+  /agents/{id}/activate:
+    post:
+      tags: [Administration]
+      security: [{ sessionCookie: [] }]
+      summary: Activa un agente
+      responses: { '204': { description: Agente activado } }
+  /agents/{id}/deactivate:
+    post:
+      tags: [Administration]
+      security: [{ sessionCookie: [] }]
+      summary: Desactiva un agente sin eliminar su historial
+      responses: { '204': { description: Agente desactivado } }
+  /devices:
+    get:
+      tags: [Administration]
+      security: [{ sessionCookie: [] }]
+      summary: Lista dispositivos y asignación vigente
+      responses: { '200': { description: Página de dispositivos } }
+    post:
+      tags: [Administration]
+      security: [{ sessionCookie: [] }]
+      summary: Registra un dispositivo institucional
+      responses: { '201': { description: Dispositivo creado }, '409': { $ref: '#/components/responses/Error' } }
+  /devices/{id}/assign:
+    post:
+      tags: [Administration]
+      security: [{ sessionCookie: [] }]
+      summary: Asigna un dispositivo conservando historial
+      responses: { '201': { description: Asignación creada }, '409': { $ref: '#/components/responses/Error' } }
+  /devices/{id}:
+    get:
+      tags: [Administration]
+      security: [{ sessionCookie: [] }]
+      summary: Consulta dispositivo, asignación vigente e historial
+      responses: { '200': { description: Dispositivo institucional }, '404': { $ref: '#/components/responses/Error' } }
+    patch:
+      tags: [Administration]
+      security: [{ sessionCookie: [] }]
+      summary: Actualiza datos del dispositivo
+      responses: { '204': { description: Dispositivo actualizado }, '409': { $ref: '#/components/responses/Error' } }
+  /devices/{id}/unassign:
+    post:
+      tags: [Administration]
+      security: [{ sessionCookie: [] }]
+      summary: Libera la asignación vigente y conserva el historial
+      responses: { '204': { description: Dispositivo liberado }, '404': { $ref: '#/components/responses/Error' } }
+  /devices/{id}/block:
+    post:
+      tags: [Administration]
+      security: [{ sessionCookie: [] }]
+      summary: Bloquea un dispositivo
+      responses: { '204': { description: Dispositivo bloqueado } }
+  /devices/{id}/unblock:
+    post:
+      tags: [Administration]
+      security: [{ sessionCookie: [] }]
+      summary: Reactiva un dispositivo bloqueado
+      responses: { '204': { description: Dispositivo reactivado } }
+  /catalogs/{catalog}:
+    get:
+      tags: [Catalogs]
+      security: [{ sessionCookie: [] }]
+      summary: Lista el catálogo permitido
+      responses: { '200': { description: Página de catálogo } }
+    post:
+      tags: [Catalogs]
+      security: [{ sessionCookie: [] }]
+      summary: Crea un valor de catálogo sin borrado físico
+      responses: { '201': { description: Registro creado }, '409': { $ref: '#/components/responses/Error' } }
+  /catalogs/{catalog}/{id}:
+    patch:
+      tags: [Catalogs]
+      security: [{ sessionCookie: [] }]
+      summary: Actualiza o activa/desactiva lógicamente un valor de catálogo
+      responses: { '204': { description: Registro actualizado }, '409': { $ref: '#/components/responses/Error' } }
+  /catalogs/infraction-rate-versions:
+    get:
+      tags: [Catalogs]
+      security: [{ sessionCookie: [] }]
+      summary: Lista el historial inmutable de tarifas con búsqueda y paginación
+      responses: { '200': { description: Página de versiones tarifarias } }
+    post:
+      tags: [Catalogs]
+      security: [{ sessionCookie: [] }]
+      summary: Crea una tarifa nueva y cierra la vigencia previa sin modificar su monto
+      responses: { '201': { description: Versión creada }, '409': { $ref: '#/components/responses/Error' } }
+  /catalogs/document-sequences:
+    get:
+      tags: [Catalogs]
+      security: [{ sessionCookie: [] }]
+      summary: Lista correlativos por sede, tipo y año con búsqueda y paginación
+      responses: { '200': { description: Página de correlativos } }
+    post:
+      tags: [Catalogs]
+      security: [{ sessionCookie: [] }]
+      summary: Crea un correlativo único por sede, tipo y año
+      responses: { '201': { description: Correlativo creado }, '409': { $ref: '#/components/responses/Error' } }
+  /catalogs/document-sequences/{id}:
+    patch:
+      tags: [Catalogs]
+      security: [{ sessionCookie: [] }]
+      summary: Actualiza la configuración de un correlativo
+      responses: { '204': { description: Correlativo actualizado }, '404': { $ref: '#/components/responses/Error' } }
+  /catalogs/document-sequences/{id}/next:
+    post:
+      tags: [Catalogs]
+      security: [{ sessionCookie: [] }]
+      summary: Obtiene el siguiente número bajo bloqueo transaccional de fila
+      responses: { '200': { description: Número único generado } }
+  /catalogs/lookups:
+    get:
+      tags: [Catalogs]
+      security: [{ sessionCookie: [] }]
+      summary: Devuelve sedes, zonas y departamentos activos para formularios
+      responses: { '200': { description: Catálogos de selección activos } }
+  /infractions:
+    get:
+      tags: [Infractions]
+      security: [{ sessionCookie: [] }]
+      summary: Lista infracciones; los agentes reciben solamente sus boletas
+      responses: { '200': { description: Página de infracciones } }
+    post:
+      tags: [Infractions]
+      security: [{ sessionCookie: [] }]
+      summary: Crea un borrador con snapshots, artículos y total calculado en servidor
+      parameters:
+        - in: header
+          name: Idempotency-Key
+          required: true
+          schema: { type: string, maxLength: 191 }
+      responses: { '201': { description: Borrador creado o respuesta idempotente }, '409': { $ref: '#/components/responses/Error' }, '422': { $ref: '#/components/responses/Error' } }
+  /infractions/{id}:
+    get:
+      tags: [Infractions]
+      security: [{ sessionCookie: [] }]
+      summary: Devuelve expediente, snapshots, artículos, evidencias y revisiones
+      responses: { '200': { description: Expediente completo }, '403': { $ref: '#/components/responses/Error' } }
+    patch:
+      tags: [Infractions]
+      security: [{ sessionCookie: [] }]
+      summary: Corrige una boleta BORRADOR o DEVUELTA_CORRECCION
+      responses: { '204': { description: Borrador actualizado }, '409': { $ref: '#/components/responses/Error' } }
+  /infractions/{id}/submit:
+    post:
+      tags: [Infractions]
+      security: [{ sessionCookie: [] }]
+      summary: Envía idempotentemente a validación
+      parameters:
+        - in: header
+          name: Idempotency-Key
+          required: true
+          schema: { type: string }
+      responses: { '204': { description: Boleta enviada }, '409': { $ref: '#/components/responses/Error' } }
+  /infractions/{id}/validate:
+    post:
+      tags: [Infractions]
+      security: [{ sessionCookie: [] }]
+      summary: Valida una boleta; prohíbe autovalidación del agente
+      responses: { '204': { description: Boleta validada }, '409': { $ref: '#/components/responses/Error' } }
+  /infractions/{id}/return:
+    post:
+      tags: [Infractions]
+      security: [{ sessionCookie: [] }]
+      summary: Devuelve con motivo, comentario y campos señalados
+      responses: { '204': { description: Boleta devuelta }, '422': { $ref: '#/components/responses/Error' } }
+  /infractions/{id}/reject:
+    post:
+      tags: [Infractions]
+      security: [{ sessionCookie: [] }]
+      summary: Rechaza con motivo institucional
+      responses: { '204': { description: Boleta rechazada } }
+  /infractions/{id}/cancel:
+    post:
+      tags: [Infractions]
+      security: [{ sessionCookie: [] }]
+      summary: Anula lógicamente con motivo institucional
+      responses: { '204': { description: Boleta anulada } }
+  /infractions/{id}/evidence:
+    post:
+      tags: [Evidence]
+      security: [{ sessionCookie: [] }]
+      summary: Guarda JPEG, PNG o PDF privado, valida su firma binaria y registra SHA-256
+      requestBody:
+        required: true
+        content:
+          image/jpeg: { schema: { type: string, format: binary } }
+          image/png: { schema: { type: string, format: binary } }
+          application/pdf: { schema: { type: string, format: binary } }
+      responses: { '201': { description: Evidencia registrada }, '413': { $ref: '#/components/responses/Error' }, '415': { $ref: '#/components/responses/Error' } }
+  /infractions/{id}/evidence/{evidenceId}:
+    get:
+      tags: [Evidence]
+      security: [{ sessionCookie: [] }]
+      summary: Entrega una evidencia activa mediante autorización y sin caché pública
+      responses:
+        '200':
+          description: Binario privado JPEG, PNG o PDF
+          headers:
+            Cache-Control: { schema: { type: string, const: 'private, no-store' } }
+        '403': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+  /infractions/{id}/timeline:
+    get:
+      tags: [Infractions]
+      security: [{ sessionCookie: [] }]
+      summary: Devuelve la línea de tiempo legal completa
+      responses: { '200': { description: Historial cronológico } }
+  /appeals:
+    get:
+      tags: [Appeals]
+      security: [{ sessionCookie: [] }]
+      summary: Lista impugnaciones con búsqueda, estado y paginación
+      responses: { '200': { description: Página de impugnaciones }, '403': { $ref: '#/components/responses/Error' } }
+    post:
+      tags: [Appeals]
+      security: [{ sessionCookie: [] }]
+      summary: Presenta una impugnación sobre una infracción validada
+      responses: { '201': { description: Expediente creado y plazo configurado o pendiente de confirmación }, '409': { $ref: '#/components/responses/Error' } }
+  /appeals/{id}:
+    get:
+      tags: [Appeals]
+      security: [{ sessionCookie: [] }]
+      summary: Obtiene solicitud, resolución, evidencia, historial y ajustes relacionados
+      responses: { '200': { description: Expediente completo }, '404': { $ref: '#/components/responses/Error' } }
+    patch:
+      tags: [Appeals]
+      security: [{ sessionCookie: [] }]
+      summary: Corrige una solicitud presentada o con información requerida
+      responses: { '204': { description: Solicitud actualizada }, '409': { $ref: '#/components/responses/Error' } }
+  /appeals/{id}/submit:
+    post:
+      tags: [Appeals]
+      security: [{ sessionCookie: [] }]
+      summary: Envía o reenvía el expediente a revisión
+      responses: { '204': { description: Estado EN_REVISION }, '409': { $ref: '#/components/responses/Error' } }
+  /appeals/{id}/request-information:
+    post:
+      tags: [Appeals]
+      security: [{ sessionCookie: [] }]
+      summary: Solicita información adicional con comentario obligatorio
+      responses: { '204': { description: Estado REQUIERE_INFORMACION }, '409': { $ref: '#/components/responses/Error' } }
+  /appeals/{id}/resolve:
+    post:
+      tags: [Appeals]
+      security: [{ sessionCookie: [] }]
+      summary: Confirma, modifica mediante ajuste o anula mediante resolución; prohíbe autorresolución
+      responses: { '200': { description: Resolución e historial registrados }, '409': { $ref: '#/components/responses/Error' } }
+  /appeals/{id}/withdraw:
+    post:
+      tags: [Appeals]
+      security: [{ sessionCookie: [] }]
+      summary: Registra el desistimiento sin borrar el expediente
+      responses: { '204': { description: Estado DESISTIDA }, '409': { $ref: '#/components/responses/Error' } }
+  /appeals/{id}/evidence:
+    post:
+      tags: [Appeals]
+      security: [{ sessionCookie: [] }]
+      summary: Adjunta JPEG, PNG o PDF a almacenamiento privado validando firma y SHA-256
+      responses: { '201': { description: Evidencia privada registrada }, '415': { $ref: '#/components/responses/Error' } }
+  /appeals/{id}/evidence/{evidenceId}:
+    get:
+      tags: [Appeals]
+      security: [{ sessionCookie: [] }]
+      summary: Entrega evidencia autorizada con caché privada deshabilitada
+      responses: { '200': { description: Documento privado }, '403': { $ref: '#/components/responses/Error' } }
+  /appeals/{id}/timeline:
+    get:
+      tags: [Appeals]
+      security: [{ sessionCookie: [] }]
+      summary: Devuelve el historial íntegro del expediente
+      responses: { '200': { description: Historial cronológico } }
+  /infractions/{id}/adjustments:
+    get:
+      tags: [Adjustments]
+      security: [{ sessionCookie: [] }]
+      summary: Devuelve libro de ajustes, historial y saldo exacto
+      responses: { '200': { description: Cuenta económica } }
+    post:
+      tags: [Adjustments]
+      security: [{ sessionCookie: [] }]
+      summary: Solicita descuento, exoneración, recargo o corrección sin alterar el original
+      responses: { '201': { description: Ajuste pendiente de aprobación }, '409': { $ref: '#/components/responses/Error' } }
+  /infractions/{id}/adjustments/{adjustmentId}/approve:
+    post:
+      tags: [Adjustments]
+      security: [{ sessionCookie: [] }]
+      summary: Aprueba un ajuste con segregación entre solicitante y decisor
+      responses: { '200': { description: Ajuste aprobado y saldo recalculado }, '409': { $ref: '#/components/responses/Error' } }
+  /infractions/{id}/adjustments/{adjustmentId}/reject:
+    post:
+      tags: [Adjustments]
+      security: [{ sessionCookie: [] }]
+      summary: Rechaza un ajuste conservando historial
+      responses: { '200': { description: Ajuste rechazado }, '409': { $ref: '#/components/responses/Error' } }
+  /infractions/{id}/adjustments/{adjustmentId}/reverse:
+    post:
+      tags: [Adjustments]
+      security: [{ sessionCookie: [] }]
+      summary: Revierte un ajuste aprobado mediante una contrapartida append-only
+      responses: { '200': { description: Ajuste reversado y saldo recalculado }, '409': { $ref: '#/components/responses/Error' } }
+  /institutional-rules:
+    get:
+      tags: [Institutional rules]
+      security: [{ sessionCookie: [] }]
+      summary: Lista versiones de reglas legales y económicas
+      responses: { '200': { description: Reglas versionadas } }
+    post:
+      tags: [Institutional rules]
+      security: [{ sessionCookie: [] }]
+      summary: Crea una nueva vigencia y cierra la anterior sin sobrescribirla
+      responses: { '201': { description: Versión creada }, '409': { $ref: '#/components/responses/Error' } }
+  /public/infractions/search:
+    post:
+      tags: [Public portal]
+      summary: Consulta por número completo de boleta y placa; nunca solo por placa
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [ticketNumber, plate]
+              additionalProperties: false
+              properties:
+                ticketNumber: { type: string, minLength: 3, maxLength: 80 }
+                plate: { type: string, minLength: 2, maxLength: 30 }
+      responses:
+        '200': { description: Datos públicos sin PII, IDs internos, agente, evidencia ni notas }
+        '404': { $ref: '#/components/responses/Error' }
+        '429': { $ref: '#/components/responses/Error' }
+  /public/infractions/{publicReference}:
+    get:
+      tags: [Public portal]
+      summary: Recupera el resultado por referencia aleatoria no consecutiva
+      responses: { '200': { description: Estado y saldo público }, '404': { $ref: '#/components/responses/Error' } }
+  /public/payment-orders:
+    post:
+      tags: [Public portal]
+      summary: Genera idempotentemente una orden; no registra un pago
+      parameters:
+        - in: header
+          name: Idempotency-Key
+          required: true
+          schema: { type: string, minLength: 8, maxLength: 200 }
+      responses: { '201': { description: Orden emitida }, '200': { description: Repetición idempotente o reutilización de una orden vigente }, '409': { $ref: '#/components/responses/Error' } }
+  /public/payment-orders/{publicReference}:
+    get:
+      tags: [Public portal]
+      summary: Consulta una orden y actualiza su expiración cuando corresponde
+      responses: { '200': { description: Orden pública; no es recibo }, '404': { $ref: '#/components/responses/Error' } }
+  /public/payment-orders/{publicReference}/document:
+    get:
+      tags: [Public portal]
+      summary: Obtiene el PDF básico de la orden, rotulado expresamente como no recibo
+      responses:
+        '200':
+          description: Orden de pago PDF
+          content: { application/pdf: { schema: { type: string, format: binary } } }
+        '404': { $ref: '#/components/responses/Error' }
+  /cash-registers:
+    get:
+      tags: [Cash]
+      security: [{ sessionCookie: [] }]
+      summary: Lista cajas institucionales configuradas
+      responses: { '200': { description: Cajas y sedes } }
+    post:
+      tags: [Cash]
+      security: [{ sessionCookie: [] }]
+      summary: Crea una caja institucional sin sembrar valores predeterminados
+      responses: { '201': { description: Caja creada }, '409': { $ref: '#/components/responses/Error' } }
+  /cash-registers/{id}:
+    patch:
+      tags: [Cash]
+      security: [{ sessionCookie: [] }]
+      summary: Actualiza o activa/desactiva una caja
+      responses: { '204': { description: Caja actualizada }, '404': { $ref: '#/components/responses/Error' } }
+  /payment-methods:
+    get:
+      tags: [Payments]
+      security: [{ sessionCookie: [] }]
+      summary: Lista métodos de pago configurables
+      responses: { '200': { description: Métodos de pago } }
+    post:
+      tags: [Payments]
+      security: [{ sessionCookie: [] }]
+      summary: Crea un método de pago institucional
+      responses: { '201': { description: Método creado }, '409': { $ref: '#/components/responses/Error' } }
+  /payment-methods/{id}:
+    patch:
+      tags: [Payments]
+      security: [{ sessionCookie: [] }]
+      summary: Actualiza o activa/desactiva un método de pago
+      responses: { '204': { description: Método actualizado }, '404': { $ref: '#/components/responses/Error' } }
+  /payments/options:
+    get:
+      tags: [Payments]
+      security: [{ sessionCookie: [] }]
+      summary: Lista órdenes pagables y métodos activos para receptoría
+      responses: { '200': { description: Opciones de pago reales } }
+  /solvencies/options:
+    get:
+      tags: [Solvencies]
+      security: [{ sessionCookie: [] }]
+      summary: Lista vehículos activos con propietario vigente para solicitudes
+      responses: { '200': { description: Opciones internas de solicitud } }
+  /cash-sessions/open:
+    post:
+      tags: [Cash]
+      security: [{ sessionCookie: [] }]
+      summary: Abre un turno de caja único para el cajero y caja
+      responses: { '201': { description: Turno abierto }, '409': { $ref: '#/components/responses/Error' } }
+  /cash-sessions/current:
+    get:
+      tags: [Cash]
+      security: [{ sessionCookie: [] }]
+      summary: Obtiene el turno abierto del cajero autenticado
+      responses: { '200': { description: Turno actual o null }, '403': { $ref: '#/components/responses/Error' } }
+  /cash-sessions/{id}/summary:
+    get:
+      tags: [Cash]
+      security: [{ sessionCookie: [] }]
+      summary: Calcula apertura, pagos, movimientos, esperado, declarado y diferencia
+      responses: { '200': { description: Resumen monetario exacto del turno }, '404': { $ref: '#/components/responses/Error' } }
+  /cash-sessions/{id}/close:
+    post:
+      tags: [Cash]
+      security: [{ sessionCookie: [] }]
+      summary: Cierra el turno con monto declarado y diferencia persistida
+      responses: { '200': { description: Turno cerrado }, '409': { $ref: '#/components/responses/Error' } }
+  /cash-sessions/{id}/movements:
+    post:
+      tags: [Cash]
+      security: [{ sessionCookie: [] }]
+      summary: Registra ingreso o egreso manual autorizado
+      responses: { '201': { description: Movimiento append-only creado }, '409': { $ref: '#/components/responses/Error' } }
+  /payments:
+    get:
+      tags: [Payments]
+      security: [{ sessionCookie: [] }]
+      summary: Lista pagos reales con filtros y paginación
+      responses: { '200': { description: Página de pagos } }
+    post:
+      tags: [Payments]
+      security: [{ sessionCookie: [] }]
+      summary: Registra idempotentemente un pago exacto contra una orden vigente
+      parameters:
+        - in: header
+          name: Idempotency-Key
+          required: true
+          schema: { type: string, minLength: 8, maxLength: 200 }
+      responses: { '201': { description: Pago registrado sin recibo }, '200': { description: Repetición idempotente }, '409': { $ref: '#/components/responses/Error' } }
+  /payments/{id}:
+    get:
+      tags: [Payments]
+      security: [{ sessionCookie: [] }]
+      summary: Obtiene pago, asignaciones, recibo y eventual reverso
+      responses: { '200': { description: Detalle del pago }, '404': { $ref: '#/components/responses/Error' } }
+  /payments/{id}/confirm:
+    post:
+      tags: [Payments]
+      security: [{ sessionCookie: [] }]
+      summary: Confirma atómicamente el pago, utiliza la orden y crea el recibo
+      parameters:
+        - in: header
+          name: Idempotency-Key
+          required: true
+          schema: { type: string, minLength: 8, maxLength: 200 }
+      responses: { '200': { description: Pago confirmado o repetición idempotente }, '409': { $ref: '#/components/responses/Error' } }
+  /payments/{id}/reverse:
+    post:
+      tags: [Payments]
+      security: [{ sessionCookie: [] }]
+      summary: Revierte mediante contrapartida sin modificar ni borrar el pago confirmado
+      parameters:
+        - in: header
+          name: Idempotency-Key
+          required: true
+          schema: { type: string, minLength: 8, maxLength: 200 }
+      responses: { '200': { description: Reverso compensatorio registrado }, '409': { $ref: '#/components/responses/Error' } }
+  /payments/{id}/receipt:
+    get:
+      tags: [Payments]
+      security: [{ sessionCookie: [] }]
+      summary: Obtiene el recibo PDF; copy=true registra y rotula la reimpresión
+      responses: { '200': { description: Recibo oficial o copia PDF }, '409': { $ref: '#/components/responses/Error' } }
+  /reconciliations:
+    get:
+      tags: [Reconciliations]
+      security: [{ sessionCookie: [] }]
+      summary: Lista lotes de conciliación
+      responses: { '200': { description: Lotes de conciliación } }
+    post:
+      tags: [Reconciliations]
+      security: [{ sessionCookie: [] }]
+      summary: Registra un lote manual o importado y sus diferencias
+      responses: { '201': { description: Lote creado }, '409': { $ref: '#/components/responses/Error' } }
+  /reconciliations/{id}:
+    get:
+      tags: [Reconciliations]
+      security: [{ sessionCookie: [] }]
+      summary: Obtiene lote, totales e ítems conciliados
+      responses: { '200': { description: Detalle del lote }, '404': { $ref: '#/components/responses/Error' } }
+  /reconciliations/{id}/close:
+    post:
+      tags: [Reconciliations]
+      security: [{ sessionCookie: [] }]
+      summary: Cierra un lote preservando sus diferencias
+      responses: { '200': { description: Lote cerrado }, '409': { $ref: '#/components/responses/Error' } }
+  /solvencies/requests:
+    get:
+      tags: [Solvencies]
+      security: [{ sessionCookie: [] }]
+      summary: Lista solicitudes internas de solvencia
+      responses: { '200': { description: Solicitudes y eventual documento emitido } }
+    post:
+      tags: [Solvencies]
+      security: [{ sessionCookie: [] }]
+      summary: Registra una solicitud y snapshots reales del vehículo y propietario
+      responses: { '201': { description: Solicitud pendiente de revisión }, '409': { $ref: '#/components/responses/Error' } }
+  /solvencies/requests/{id}:
+    get:
+      tags: [Solvencies]
+      security: [{ sessionCookie: [] }]
+      summary: Obtiene solicitud, snapshots financieros y eventual solvencia
+      responses: { '200': { description: Expediente de solicitud }, '404': { $ref: '#/components/responses/Error' } }
+  /solvencies/requests/{id}/approve:
+    post:
+      tags: [Solvencies]
+      security: [{ sessionCookie: [] }]
+      summary: Recalcula elegibilidad y emite una sola solvencia con referencia aleatoria
+      responses: { '201': { description: Solvencia emitida }, '409': { $ref: '#/components/responses/Error' } }
+  /solvencies/requests/{id}/reject:
+    post:
+      tags: [Solvencies]
+      security: [{ sessionCookie: [] }]
+      summary: Rechaza con motivo conservando historial
+      responses: { '200': { description: Solicitud rechazada }, '409': { $ref: '#/components/responses/Error' } }
+  /solvencies/{id}:
+    get:
+      tags: [Solvencies]
+      security: [{ sessionCookie: [] }]
+      summary: Obtiene el documento y sus snapshots internos
+      responses: { '200': { description: Solvencia interna }, '404': { $ref: '#/components/responses/Error' } }
+  /solvencies/{id}/document:
+    get:
+      tags: [Solvencies]
+      security: [{ sessionCookie: [] }]
+      summary: Genera el PDF oficial sin crear una nueva solvencia
+      responses: { '200': { description: Documento PDF }, '404': { $ref: '#/components/responses/Error' } }
+  /solvencies/{id}/revoke:
+    post:
+      tags: [Solvencies]
+      security: [{ sessionCookie: [] }]
+      summary: Revoca sin borrar y registra historial
+      responses: { '200': { description: Solvencia revocada }, '409': { $ref: '#/components/responses/Error' } }
+  /public/solvencies/{publicReference}/verify:
+    get:
+      tags: [Solvencies, Public portal]
+      summary: Verifica vigencia por referencia aleatoria sin exponer PII
+      responses: { '200': { description: Estado, correlativo y vigencia públicos }, '404': { $ref: '#/components/responses/Error' }, '429': { $ref: '#/components/responses/Error' } }
+  /dashboard:
+    get:
+      tags: [Dashboard]
+      security: [{ sessionCookie: [] }]
+      summary: Devuelve KPI y series agregadas por MySQL
+      parameters:
+        - { name: from, in: query, schema: { type: string, format: date } }
+        - { name: to, in: query, schema: { type: string, format: date } }
+        - { name: departmentId, in: query, schema: { type: integer } }
+      responses: { '200': { description: Indicadores, gráficas y dependencias }, '403': { $ref: '#/components/responses/Error' }, '422': { $ref: '#/components/responses/Error' } }
+  /reports/{type}:
+    get:
+      tags: [Reports]
+      security: [{ sessionCookie: [] }]
+      summary: Consulta un reporte paginado con filtros
+      parameters:
+        - { name: type, in: path, required: true, schema: { type: string, enum: [infractions, collection, cash, payments-reversals, reconciliation, aging, adjustments-exemptions, appeals, solvencies, agent-activity, audit] } }
+        - { name: from, in: query, schema: { type: string, format: date } }
+        - { name: to, in: query, schema: { type: string, format: date } }
+        - { name: departmentId, in: query, schema: { type: integer } }
+        - { name: page, in: query, schema: { type: integer, minimum: 1 } }
+        - { name: pageSize, in: query, schema: { type: integer, minimum: 1, maximum: 100 } }
+      responses: { '200': { description: Filas y metadatos de paginación }, '403': { $ref: '#/components/responses/Error' } }
+  /reports/{type}/export.csv:
+    get:
+      tags: [Reports]
+      security: [{ sessionCookie: [] }]
+      summary: Exporta hasta 10000 filas por lotes en CSV UTF-8
+      parameters:
+        - { name: type, in: path, required: true, schema: { type: string } }
+        - { name: from, in: query, schema: { type: string, format: date } }
+        - { name: to, in: query, schema: { type: string, format: date } }
+      responses: { '200': { description: Archivo CSV }, '403': { $ref: '#/components/responses/Error' } }
+  /reports/dashboard-summary.pdf:
+    get:
+      tags: [Reports]
+      security: [{ sessionCookie: [] }]
+      summary: Exporta el resumen administrativo en PDF
+      responses: { '200': { description: Archivo PDF }, '403': { $ref: '#/components/responses/Error' } }
+  /notifications:
+    get:
+      tags: [Notifications]
+      security: [{ sessionCookie: [] }]
+      summary: Lista la bandeja personal paginada
+      responses: { '200': { description: Notificaciones propias } }
+  /notifications/unread-count:
+    get:
+      tags: [Notifications]
+      security: [{ sessionCookie: [] }]
+      summary: Cuenta notificaciones propias no leídas
+      responses: { '200': { description: Conteo actual } }
+  /notifications/{id}/read:
+    patch:
+      tags: [Notifications]
+      security: [{ sessionCookie: [] }]
+      summary: Marca una notificación propia como leída
+      responses: { '204': { description: Marcada }, '404': { $ref: '#/components/responses/Error' } }
+  /notifications/read-all:
+    post:
+      tags: [Notifications]
+      security: [{ sessionCookie: [] }]
+      summary: Marca toda la bandeja propia como leída
+      responses: { '200': { description: Cantidad actualizada } }
+  /notifications/preferences:
+    get:
+      tags: [Notifications]
+      security: [{ sessionCookie: [] }]
+      summary: Consulta preferencias y estado de canales externos
+      responses: { '200': { description: Preferencias personales } }
+    put:
+      tags: [Notifications]
+      security: [{ sessionCookie: [] }]
+      summary: Reemplaza preferencias internas propias
+      responses: { '204': { description: Preferencias guardadas }, '422': { $ref: '#/components/responses/Error' } }
+  /notifications/templates:
+    get:
+      tags: [Notifications]
+      security: [{ sessionCookie: [] }]
+      summary: Lista plantillas internas; requiere permiso administrativo
+      responses: { '200': { description: Plantillas configurables }, '403': { $ref: '#/components/responses/Error' } }
+  /notifications/templates/{eventCode}:
+    patch:
+      tags: [Notifications]
+      security: [{ sessionCookie: [] }]
+      summary: Modifica una plantilla interna y audita el cambio
+      responses: { '204': { description: Plantilla actualizada }, '403': { $ref: '#/components/responses/Error' } }
+  /admin/historical-migrations/uploads:
+    post:
+      tags: [Historical migrations]
+      security: [{ sessionCookie: [] }]
+      summary: Almacena un CSV en staging privado; no escribe tablas operativas
+      parameters:
+        - { in: header, name: X-File-Name, required: true, schema: { type: string, pattern: '^[^/\\]+\.csv$' } }
+        - { in: header, name: X-Source-System, required: true, schema: { type: string, minLength: 2, maxLength: 100 } }
+        - { in: header, name: X-Migration-Entity, required: true, schema: { $ref: '#/components/schemas/HistoricalEntity' } }
+      requestBody:
+        required: true
+        content:
+          text/csv: { schema: { type: string, format: binary } }
+      responses:
+        '201': { description: Nuevo lote UPLOADED }
+        '200': { description: Reintento idempotente del mismo archivo }
+        '403': { $ref: '#/components/responses/Error' }
+        '413': { $ref: '#/components/responses/Error' }
+        '415': { $ref: '#/components/responses/Error' }
+  /admin/historical-migrations/batches:
+    get:
+      tags: [Historical migrations]
+      security: [{ sessionCookie: [] }]
+      summary: Lista lotes históricos paginados
+      parameters:
+        - { in: query, name: page, schema: { type: integer, minimum: 1, default: 1 } }
+        - { in: query, name: pageSize, schema: { type: integer, minimum: 1, maximum: 100, default: 25 } }
+        - { in: query, name: status, schema: { type: string } }
+        - { in: query, name: entity, schema: { $ref: '#/components/schemas/HistoricalEntity' } }
+      responses: { '200': { description: Lotes y total }, '403': { $ref: '#/components/responses/Error' } }
+  /admin/historical-migrations/batches/{id}:
+    get:
+      tags: [Historical migrations]
+      security: [{ sessionCookie: [] }]
+      summary: Consulta resumen, archivo y bitácora del lote
+      parameters: [{ $ref: '#/components/parameters/MigrationBatchId' }]
+      responses: { '200': { description: Detalle de lote }, '404': { $ref: '#/components/responses/Error' } }
+  /admin/historical-migrations/batches/{id}/validate:
+    post:
+      tags: [Historical migrations]
+      security: [{ sessionCookie: [] }]
+      summary: Valida staging, duplicados, relaciones y catálogos sin escribir operación
+      parameters: [{ $ref: '#/components/parameters/MigrationBatchId' }]
+      responses: { '200': { description: Resultado VALIDATED o REQUIRES_REVIEW }, '409': { $ref: '#/components/responses/Error' } }
+  /admin/historical-migrations/batches/{id}/preview:
+    get:
+      tags: [Historical migrations]
+      security: [{ sessionCookie: [] }]
+      summary: Vista previa paginada de datos normalizados
+      parameters: [{ $ref: '#/components/parameters/MigrationBatchId' }]
+      responses: { '200': { description: Filas staged } }
+  /admin/historical-migrations/batches/{id}/errors:
+    get:
+      tags: [Historical migrations]
+      security: [{ sessionCookie: [] }]
+      summary: Lista errores con valores sensibles enmascarados
+      parameters: [{ $ref: '#/components/parameters/MigrationBatchId' }]
+      responses: { '200': { description: Errores paginados } }
+  /admin/historical-migrations/batches/{id}/conflicts:
+    get:
+      tags: [Historical migrations]
+      security: [{ sessionCookie: [] }]
+      summary: Lista duplicados, referencias y mapeos pendientes
+      parameters: [{ $ref: '#/components/parameters/MigrationBatchId' }]
+      responses: { '200': { description: Conflictos paginados } }
+  /admin/historical-migrations/batches/{id}/mappings:
+    patch:
+      tags: [Historical migrations]
+      security: [{ sessionCookie: [] }]
+      summary: Registra una decisión de mapeo versionada y explícita
+      parameters: [{ $ref: '#/components/parameters/MigrationBatchId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [mappingType, sourceValue]
+              properties:
+                mappingType: { type: string, enum: [TABLE, COLUMN, STATUS, ARTICLE, AGENT, PAYMENT_METHOD] }
+                entityType: { $ref: '#/components/schemas/HistoricalEntity' }
+                sourceValue: { type: string }
+                targetEntityType: { type: string }
+                targetEntityId: { type: integer, minimum: 1 }
+                targetValue: { type: string }
+                conflictId: { type: integer, minimum: 1 }
+      responses: { '200': { description: Mapeo aprobado y versionado }, '422': { $ref: '#/components/responses/Error' } }
+  /admin/historical-migrations/batches/{id}/approve:
+    post:
+      tags: [Historical migrations]
+      security: [{ sessionCookie: [] }]
+      summary: Lleva un lote VALIDATED sin hallazgos a READY
+      parameters: [{ $ref: '#/components/parameters/MigrationBatchId' }]
+      responses: { '200': { description: Lote READY }, '409': { $ref: '#/components/responses/Error' } }
+  /admin/historical-migrations/batches/{id}/import:
+    post:
+      tags: [Historical migrations]
+      security: [{ sessionCookie: [] }]
+      summary: Importa append-only dentro de una transacción y genera conciliación
+      parameters: [{ $ref: '#/components/parameters/MigrationBatchId' }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/MigrationConfirmation' } } }
+      responses: { '200': { description: COMPLETED o replay idempotente }, '409': { $ref: '#/components/responses/Error' } }
+  /admin/historical-migrations/batches/{id}/revert:
+    post:
+      tags: [Historical migrations]
+      security: [{ sessionCookie: [] }]
+      summary: Revierte solo filas del lote sin referencias posteriores
+      parameters: [{ $ref: '#/components/parameters/MigrationBatchId' }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/MigrationConfirmation' } } }
+      responses: { '200': { description: REVERTED o replay idempotente }, '409': { $ref: '#/components/responses/Error' } }
+  /admin/historical-migrations/batches/{id}/report:
+    get:
+      tags: [Historical migrations]
+      security: [{ sessionCookie: [] }]
+      summary: Descarga conciliación CSV del lote
+      parameters: [{ $ref: '#/components/parameters/MigrationBatchId' }]
+      responses: { '200': { description: Reporte CSV, content: { text/csv: { schema: { type: string } } } } }
+  /admin/historical-migrations/templates/{entity}:
+    get:
+      tags: [Historical migrations]
+      security: [{ sessionCookie: [] }]
+      summary: Descarga una plantilla CSV con ejemplo sintético
+      parameters:
+        - { in: path, name: entity, required: true, schema: { $ref: '#/components/schemas/HistoricalEntity' } }
+      responses: { '200': { description: Plantilla CSV, content: { text/csv: { schema: { type: string } } } } }
+components:
+  parameters:
+    MigrationBatchId:
+      in: path
+      name: id
+      required: true
+      schema: { oneOf: [{ type: integer, minimum: 1 }, { type: string, format: uuid }] }
+  schemas:
+    HistoricalEntity:
+      type: string
+      enum: [citizens, vehicles, agents, infractions, infraction_items, payments, payment_allocations, receipts, adjustments, solvencies]
+    MigrationConfirmation:
+      type: object
+      required: [confirmation]
+      properties:
+        confirmation: { type: string, description: 'IMPORTAR <uuid> o REVERTIR <uuid>' }
+  securitySchemes:
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: pmt_session
+  responses:
+    Error:
+      description: Error estable con requestId
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [error, meta]
+            properties:
+              error:
+                type: object
+                required: [code, message]
+                properties:
+                  code: { type: string }
+                  message: { type: string }
+              meta:
+                type: object
+                required: [requestId]
+                properties:
+                  requestId: { type: string, format: uuid }

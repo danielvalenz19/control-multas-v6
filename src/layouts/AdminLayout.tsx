@@ -1,11 +1,12 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   AppBar,
   Avatar,
   Badge,
   Box,
+  ButtonBase,
   Divider,
   Drawer,
   IconButton,
@@ -38,10 +39,12 @@ import ReceiptLongRoundedIcon from "@mui/icons-material/ReceiptLongRounded";
 import SecurityRoundedIcon from "@mui/icons-material/SecurityRounded";
 import SettingsRoundedIcon from "@mui/icons-material/SettingsRounded";
 import VerifiedRoundedIcon from "@mui/icons-material/VerifiedRounded";
+import MoveToInboxRoundedIcon from "@mui/icons-material/MoveToInboxRounded";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { MunicipalBrand } from "@/src/layouts/PublicLayout";
 import { useApp } from "@/src/contexts/AppContext";
 import type { RoleName } from "@/src/types";
+import { notificationsApi } from "@/src/modules/notifications/api/notificationsApi";
 
 interface NavItem {
   label: string;
@@ -67,6 +70,12 @@ const nav: { group: string; items: NavItem[] }[] = [
         icon: <FactCheckRoundedIcon />,
         roles: ["ADMIN", "SUPERVISOR", "PMT", "RECEPTORIA", "SOLVENCIAS"],
         count: 8,
+      },
+      {
+        label: "Notificaciones",
+        to: "/admin/notificaciones",
+        icon: <NotificationsNoneRoundedIcon />,
+        roles: ["ADMIN", "SUPERVISOR", "PMT", "RECEPTORIA", "SOLVENCIAS"],
       },
     ],
   },
@@ -96,7 +105,6 @@ const nav: { group: string; items: NavItem[] }[] = [
         to: "/admin/solvencias",
         icon: <VerifiedRoundedIcon />,
         roles: ["ADMIN", "SUPERVISOR", "SOLVENCIAS"],
-        count: 2,
       },
       {
         label: "Recursos",
@@ -139,6 +147,12 @@ const nav: { group: string; items: NavItem[] }[] = [
         roles: ["ADMIN"],
       },
       {
+        label: "Agentes PMT",
+        to: "/admin/agentes",
+        icon: <AccountCircleRoundedIcon />,
+        roles: ["ADMIN", "SUPERVISOR"],
+      },
+      {
         label: "Roles y permisos",
         to: "/admin/roles",
         icon: <SecurityRoundedIcon />,
@@ -148,6 +162,12 @@ const nav: { group: string; items: NavItem[] }[] = [
         label: "Catálogos",
         to: "/admin/catalogos",
         icon: <CategoryRoundedIcon />,
+        roles: ["ADMIN"],
+      },
+      {
+        label: "Migraciones históricas",
+        to: "/admin/migraciones-historicas",
+        icon: <MoveToInboxRoundedIcon />,
         roles: ["ADMIN"],
       },
       {
@@ -174,12 +194,15 @@ const titles: Record<string, string> = {
   impugnaciones: "Recursos e impugnaciones",
   reportes: "Reportes",
   usuarios: "Usuarios",
+  agentes: "Agentes PMT",
   roles: "Roles y permisos",
   catalogos: "Catálogos",
   dispositivos: "Dispositivos y sincronización",
   auditoria: "Auditoría",
   configuracion: "Configuración",
   perfil: "Mi perfil",
+  notificaciones: "Notificaciones",
+  "migraciones-historicas": "Migraciones históricas",
 };
 
 export default function AdminLayout() {
@@ -190,6 +213,12 @@ export default function AdminLayout() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
   const [profileAnchor, setProfileAnchor] = useState<HTMLElement | null>(null);
+  const [unreadNotifications, setUnreadNotifications] = useState(0);
+  useEffect(() => {
+    let active = true;
+    void notificationsApi.unreadCount().then((result) => { if (active) setUnreadNotifications(result.data.count); }).catch(() => undefined);
+    return () => { active = false; };
+  }, [location.pathname]);
   const moduleTitle = useMemo(() => {
     const segment =
       location.pathname.split("/").filter(Boolean).at(-1) ?? "dashboard";
@@ -286,17 +315,18 @@ export default function AdminLayout() {
               <Typography component="strong">{moduleTitle}</Typography>
             </Box>
             <Box className="admin-toolbar-actions">
-              <IconButton aria-label="Notificaciones">
-                <Badge variant="dot" color="error">
+              <IconButton aria-label="Notificaciones" onClick={() => navigate("/admin/notificaciones")}>
+                <Badge badgeContent={unreadNotifications} color="error" max={99}>
                   <NotificationsNoneRoundedIcon />
                 </Badge>
               </IconButton>
               <Divider orientation="vertical" flexItem />
-              <Box
+              <ButtonBase
                 className="current-user"
                 onClick={(event) => setProfileAnchor(event.currentTarget)}
-                role="button"
-                tabIndex={0}
+                aria-label={`Abrir menú de ${session.name}`}
+                aria-haspopup="menu"
+                aria-expanded={Boolean(profileAnchor)}
               >
                 <Avatar>
                   {session.name
@@ -309,7 +339,7 @@ export default function AdminLayout() {
                   <Typography>{session.name}</Typography>
                   <Typography component="small">{session.roleLabel}</Typography>
                 </Box>
-              </Box>
+              </ButtonBase>
             </Box>
           </Toolbar>
         </AppBar>

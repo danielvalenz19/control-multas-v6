@@ -1,0 +1,2 @@
+import { useCallback,useEffect,useState } from "react";
+export function useRemoteData<T>(loader:()=>Promise<T>,dependencies:unknown[]=[]){const [data,setData]=useState<T|null>(null);const [loading,setLoading]=useState(true);const [error,setError]=useState("");const refresh=useCallback(async()=>{setLoading(true);setError("");try{setData(await loader());}catch(cause){setError(cause instanceof Error?cause.message:"No se pudo cargar la información.");}finally{setLoading(false);}},dependencies);useEffect(()=>{void refresh();},[refresh]);return{data,loading,error,refresh};}

@@ -1,0 +1,2 @@
+legacy_id,solvency_request_number,solvency_number,vehicle_legacy_id,status,issued_at,expires_at,validity_rule_version_id
+SOL-DEMO-001,SOLREQ-DEMO-001,SOL-DEMO-2024-001,VEH-DEMO-001,VALID,2024-01-20 08:00:00,2024-02-19 08:00:00,999999

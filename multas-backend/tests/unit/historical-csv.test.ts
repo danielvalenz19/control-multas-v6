@@ -1,0 +1,16 @@
+import { describe, expect, it } from "vitest";
+import { applyColumnMappings, entityHeaders, historicalEntities, normalizeDeterministic, parseAndDecodeCsv, validateHeaders, validateRecord } from "../../src/modules/historical-migrations/application/HistoricalCsv.js";
+import { HistoricalMigrationService } from "../../src/modules/historical-migrations/application/HistoricalMigrationService.js";
+import type { MySqlDatabase } from "../../src/shared/infrastructure/mysql/MySqlConnection.js";
+
+describe("historical CSV boundary",()=>{
+  it("parses quoted UTF-8 CSV and preserves commas",()=>{const result=parseAndDecodeCsv(Buffer.from('legacy_id,identification_type,identification_number,nit,first_names,last_names,address,phone,email,status\r\nC-1,DPI,9999,,"Ana, Demo",Historia,,,,ACTIVE\r\n'));expect(result.encoding).toBe("UTF-8");expect(result.records[0]?.["first_names"]).toBe("Ana, Demo");});
+  it("detects Windows-1252 input",()=>{const bytes=Buffer.concat([Buffer.from("legacy_id,name\r\nA-1,Jos"),Buffer.from([0xe9]),Buffer.from("\r\n")]);expect(parseAndDecodeCsv(bytes).encoding).toBe("WINDOWS-1252");});
+  it("rejects executables, Access files and malformed CSV",()=>{for(const content of [Buffer.from("MZpayload"),Buffer.from([0xd0,0xcf,0x11,0xe0,0xa1,0xb1,0x1a,0xe1]),Buffer.from('a,b\n"open,b\n')])expect(()=>parseAndDecodeCsv(content)).toThrow();});
+  it("reports missing and unexpected headers",()=>{expect(validateHeaders("agents",["legacy_id","unexpected"])).toEqual({missing:["user_email","badge_number","status","hired_at"],unexpected:["unexpected"]});});
+  it("normalizes plates and identifiers deterministically",()=>{const citizen=validateRecord("citizens",{legacy_id:"C-1",identification_type:"DPI",identification_number:" 12-34 ",nit:"1-2",first_names:"Ana",last_names:"Demo",address:"",phone:"",email:"",status:"ACTIVE"});expect(citizen.success).toBe(true);if(citizen.success)expect(normalizeDeterministic("citizens",citizen.data).identification_normalized).toBe("1234");});
+  it("rejects ambiguous money and dates",()=>{const payment={legacy_id:"P-1",payment_order_number:"O-1",cash_session_id:"1",payment_method_code:"CASH",amount:"1,000.00",currency:"GTQ",status:"CONFIRMED",confirmed_at:"01/02/2024",external_reference:""};expect(validateRecord("payments",payment).success).toBe(false);});
+  it("supports explicit column mappings without guessing",()=>{const mapped=applyColumnMappings({Codigo:"C-1",Nombre:"Ana"},new Map([["Codigo","legacy_id"]]));expect(mapped).toEqual({legacy_id:"C-1",Nombre:"Ana"});});
+  it("keeps all ten templates under contract",()=>{expect(historicalEntities).toHaveLength(10);for(const value of historicalEntities)expect(entityHeaders[value][0]).toBe("legacy_id");});
+  it("rejects false extensions and traversal before touching the database",async()=>{const service=new HistoricalMigrationService({} as MySqlDatabase,"storage/private/test",1024,1);const base={content:Buffer.from("a,b\n1,2\n"),mimeType:"text/csv",sourceSystem:"TEST",entity:"citizens" as const,actorUserId:"1"};await expect(service.upload({...base,originalName:"payload.exe"})).rejects.toMatchObject({code:"MIGRATION_FILE_EXTENSION_INVALID"});await expect(service.upload({...base,originalName:"../citizens.csv"})).rejects.toMatchObject({code:"MIGRATION_FILE_EXTENSION_INVALID"});});
+});

@@ -1,0 +1,2 @@
+legacy_id,plate,registration_card,vehicle_type,brand,line,model_year,color,vin_chassis,engine_number,status,owner_legacy_id,ownership_started_at
+VEH-DEMO-001,P999DEM,TRJ-DEMO-001,AUTOMOVIL,MARCA DEMO,LINEA DEMO,2020,AZUL,VINDEMO00000000001,ENG-DEMO-001,ACTIVE,CIU-DEMO-001,2020-01-15

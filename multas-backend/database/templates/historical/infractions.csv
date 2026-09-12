@@ -1,0 +1,2 @@
+legacy_id,ticket_number,case_number,site_code,agent_legacy_id,device_uuid,citizen_legacy_id,vehicle_legacy_id,status,occurred_at,driver_absent,driver_refused_signature,location,observations,total_amount
+INF-DEMO-001,BOL-DEMO-001,EXP-DEMO-001,CENTRAL,AGE-DEMO-001,DEVICE-DEMO-001,CIU-DEMO-001,VEH-DEMO-001,VALIDADA,2024-01-15 10:30:00,0,0,Ubicación sintética,Registro completamente sintético,500.00

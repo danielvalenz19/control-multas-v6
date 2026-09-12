@@ -1,20 +1,15 @@
 // @vitest-environment jsdom
 
 import { beforeEach, describe, expect, it } from "vitest";
-import { authService, dataService } from "../src/services/mockApi";
-import { DEMO_PASSWORD, users } from "../src/mocks/seed";
+import { dataService } from "../src/services/mockApi";
+import type { User } from "../src/types";
 
-const admin = users[0];
+const admin: User = { id: "test-admin", name: "Test Admin", email: "test@example.invalid", role: "ADMIN", roleLabel: "Administrador", dependency: "Pruebas", enabled: true, lastAccess: "Ahora" };
 
 describe("flujos municipales simulados", () => {
   beforeEach(() => {
     window.localStorage.clear();
     dataService.resetDemo();
-  });
-
-  it("acepta credenciales demo y rechaza contraseñas incorrectas", async () => {
-    await expect(authService.login("admin@pmt.demo", DEMO_PASSWORD)).resolves.toMatchObject({ role: "ADMIN" });
-    await expect(authService.login("admin@pmt.demo", "incorrecta")).rejects.toMatchObject({ code: "INVALID_CREDENTIALS" });
   });
 
   it("exige la combinación correcta de boleta y placa en la consulta pública", async () => {

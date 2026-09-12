@@ -1,0 +1,11 @@
+node_modules/
+dist/
+coverage/
+backups/
+.env
+.env.docker
+.env.*
+!.env.example
+!.env.docker.example
+*.log
+.DS_Store

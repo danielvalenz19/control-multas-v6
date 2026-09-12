@@ -1,0 +1,2 @@
+legacy_id,identification_type,identification_number,nit,first_names,last_names,address,phone,email,status
+CIU-DEMO-001,DPI,9999000010101,9999000-1,Ana Demo,Histórica,Dirección sintética 1,55500001,ana.demo@example.invalid,ACTIVE

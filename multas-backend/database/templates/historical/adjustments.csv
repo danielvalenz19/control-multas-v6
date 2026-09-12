@@ -1,0 +1,2 @@
+legacy_id,infraction_legacy_id,adjustment_type,direction,amount,status,reason,legal_basis,authorization_reference,requested_at,decided_at
+AJU-DEMO-001,INF-DEMO-001,DISCOUNT,CREDIT,50.00,APPROVED,Motivo sintético,Base legal sintética,AUT-DEMO-001,2024-01-15 12:00:00,2024-01-15 13:00:00

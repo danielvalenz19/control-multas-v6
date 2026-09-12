@@ -1,29 +1,90 @@
-/**
- * Contrato preparado para reemplazar `mockApi` por un backend Express.
- * Las páginas consumen servicios de dominio, por lo que el cambio no exige
- * reescribir componentes ni reglas visuales.
- */
+export const API_BASE_URL = (import.meta.env.VITE_API_URL ?? "/api/v1").replace(
+  /\/$/,
+  "",
+);
 
-export const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "/api";
+export class HttpClientError extends Error {
+  public constructor(
+    public readonly code: string,
+    message: string,
+    public readonly status: number,
+    public readonly requestId: string | null,
+    public readonly details?: unknown,
+  ) {
+    super(message);
+    this.name = "HttpClientError";
+  }
+}
 
-export const apiEndpoints = {
-  session: `${API_BASE_URL}/auth/session`,
-  me: `${API_BASE_URL}/auth/me`,
-  infractions: `${API_BASE_URL}/infractions`,
-  paymentOrders: `${API_BASE_URL}/payment-orders`,
-  payments: `${API_BASE_URL}/payments`,
-  reconciliation: `${API_BASE_URL}/payments/reconciliation`,
-  solvencies: `${API_BASE_URL}/solvencies`,
-  publicLookup: `${API_BASE_URL}/public/infractions/lookup`,
-  publicVerify: `${API_BASE_URL}/public/solvencies/verify`,
-  dashboard: `${API_BASE_URL}/dashboard/summary`,
-  reports: `${API_BASE_URL}/reports`,
-  audit: `${API_BASE_URL}/audit-logs`,
-} as const;
+type RequestOptions = Omit<RequestInit, "body"> & {
+  body?: unknown;
+  handleUnauthorized?: boolean;
+};
 
-export async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(path, { ...init, headers: { "Content-Type": "application/json", ...init?.headers }, credentials: "include" });
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok) throw payload;
+export async function httpRequest<T>(
+  path: string,
+  options: RequestOptions = {},
+): Promise<T> {
+  const isFormData = options.body instanceof FormData;
+  const isBinary =
+    options.body instanceof Blob || options.body instanceof ArrayBuffer;
+  const requestBody: BodyInit | undefined =
+    options.body === undefined
+      ? undefined
+      : isFormData || isBinary
+        ? (options.body as BodyInit)
+        : (JSON.stringify(options.body) ?? undefined);
+  const headers = new Headers(options.headers);
+  if (options.body !== undefined && !isFormData && !isBinary)
+    headers.set("content-type", "application/json");
+  headers.set("accept", "application/json");
+  const response = await fetch(
+    `${API_BASE_URL}${path.startsWith("/") ? path : `/${path}`}`,
+    {
+      ...options,
+      credentials: "include",
+      headers,
+      body: requestBody,
+    },
+  );
+  if (response.status === 204) return undefined as T;
+  const payload = await parsePayload(response);
+  if (!response.ok) {
+    const error = (payload && typeof payload === "object" ? payload : {}) as {
+      error?: { code?: string; message?: string; details?: unknown };
+      meta?: { requestId?: string };
+    };
+    if (response.status === 401 && options.handleUnauthorized !== false) {
+      window.dispatchEvent(new CustomEvent("pmt:unauthorized"));
+    }
+    throw new HttpClientError(
+      error.error?.code ?? `HTTP_${response.status}`,
+      error.error?.message ?? statusMessage(response.status),
+      response.status,
+      error.meta?.requestId ?? response.headers.get("x-request-id"),
+      error.error?.details,
+    );
+  }
   return payload as T;
+}
+
+async function parsePayload(response: Response): Promise<unknown> {
+  const type = response.headers.get("content-type") ?? "";
+  if (type.includes("application/json")) return response.json();
+  const text = await response.text();
+  return text ? { data: text } : undefined;
+}
+
+function statusMessage(status: number): string {
+  const messages: Record<number, string> = {
+    400: "La solicitud no es válida.",
+    401: "La sesión no está disponible.",
+    403: "No tienes permiso para esta acción.",
+    404: "El recurso no existe.",
+    409: "El registro entra en conflicto con otro existente.",
+    422: "Los datos no pudieron procesarse.",
+    429: "Demasiadas solicitudes. Intenta más tarde.",
+    500: "El servidor no pudo completar la operación.",
+  };
+  return messages[status] ?? "No se pudo completar la solicitud.";
 }

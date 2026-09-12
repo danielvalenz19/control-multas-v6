@@ -1,0 +1,2 @@
+legacy_id,payment_order_number,cash_session_id,payment_method_code,amount,currency,status,confirmed_at,external_reference
+PAG-DEMO-001,ORD-DEMO-001,999999,EFECTIVO,500.00,GTQ,CONFIRMED,2024-01-16 09:00:00,REF-DEMO-001

@@ -1,7 +1,8 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
-import { authService, dataService } from "@/src/services/mockApi";
+import { dataService } from "@/src/services/mockApi";
+import { useAuth } from "@/src/modules/auth/hooks/useAuth";
 import type { ApiError, AuditEvent, Infraction, Payment, SolvencyRequest, User } from "@/src/types";
 
 interface AppContextValue {
@@ -27,12 +28,12 @@ interface AppContextValue {
 const AppContext = createContext<AppContextValue | null>(null);
 
 export function AppProvider({ children }: { children: React.ReactNode }) {
-  const [session, setSession] = useState<User | null>(() => authService.current());
+  const auth = useAuth();
   const [infractions, setInfractions] = useState<Infraction[]>([]);
   const [payments, setPayments] = useState<Payment[]>([]);
   const [solvencies, setSolvencies] = useState<SolvencyRequest[]>([]);
   const [audit, setAudit] = useState<AuditEvent[]>([]);
-  const [initializing, setInitializing] = useState(true);
+  const [operationalInitializing, setOperationalInitializing] = useState(true);
 
   const refresh = useCallback(async () => {
     const data = await dataService.snapshot();
@@ -40,19 +41,19 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => {
-    const timer = window.setTimeout(() => { void refresh().finally(() => setInitializing(false)); }, 0);
+    const timer = window.setTimeout(() => { void refresh().finally(() => setOperationalInitializing(false)); }, 0);
     return () => window.clearTimeout(timer);
   }, [refresh]);
 
   const requireSession = useCallback(() => {
-    if (!session) throw { code: "SESSION_REQUIRED", message: "La sesión ya no está disponible." } satisfies ApiError;
-    return session;
-  }, [session]);
+    if (!auth.user) throw { code: "SESSION_REQUIRED", message: "La sesión ya no está disponible." } satisfies ApiError;
+    return auth.user;
+  }, [auth.user]);
 
   const value = useMemo<AppContextValue>(() => ({
-    session, infractions, payments, solvencies, audit, initializing,
-    login: async (email, password) => { const user = await authService.login(email, password); setSession(user); return user; },
-    logout: async () => { await authService.logout(); setSession(null); },
+    session: auth.user, infractions, payments, solvencies, audit, initializing: auth.initializing || operationalInitializing,
+    login: auth.login,
+    logout: auth.logout,
     refresh,
     publicLookup: dataService.publicLookup,
     verifySolvency: dataService.verifySolvency,
@@ -62,7 +63,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     reversePayment: async (id, reason) => { await dataService.reversePayment(id, reason, requireSession()); await refresh(); },
     issueSolvency: async (id) => { const result = await dataService.issueSolvency(id, requireSession()); await refresh(); return result; },
     cancelSolvency: async (id, reason) => { await dataService.cancelSolvency(id, reason, requireSession()); await refresh(); },
-  }), [session, infractions, payments, solvencies, audit, initializing, refresh, requireSession]);
+  }), [auth, infractions, payments, solvencies, audit, operationalInitializing, refresh, requireSession]);
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
 }
