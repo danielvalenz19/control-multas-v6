@@ -216,8 +216,10 @@ export default function AdminLayout() {
   const [unreadNotifications, setUnreadNotifications] = useState(0);
   useEffect(() => {
     let active = true;
-    void notificationsApi.unreadCount().then((result) => { if (active) setUnreadNotifications(result.data.count); }).catch(() => undefined);
-    return () => { active = false; };
+    const refreshUnread = () => { void notificationsApi.unreadCount().then((result) => { if (active) setUnreadNotifications(result.data.count); }).catch(() => undefined); };
+    refreshUnread();
+    window.addEventListener("pmt:notifications-changed", refreshUnread);
+    return () => { active = false; window.removeEventListener("pmt:notifications-changed", refreshUnread); };
   }, [location.pathname]);
   const moduleTitle = useMemo(() => {
     const segment =

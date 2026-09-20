@@ -1029,3 +1029,59 @@ body { background: #dfe4de; }
   body { background: white; }
   .MuiPaper-root { box-shadow: none !important; }
 }
+
+/* QA polish: date filters, alerts and notifications keep their hierarchy at every width. */
+.dashboard-filter-bar,
+.filter-bar,
+.report-controls {
+  align-items: flex-start;
+  gap: 16px;
+}
+.date-range-field { min-width: 196px; }
+.date-range-field .MuiFormHelperText-root {
+  min-height: 18px;
+  margin-left: 2px;
+  font-size: .69rem;
+  line-height: 1.35;
+}
+.date-range-caption {
+  align-self: center;
+  margin-left: auto !important;
+  color: var(--muted);
+  font-size: .74rem !important;
+  font-weight: 700 !important;
+}
+.range-alert {
+  margin: -4px 0 18px;
+  border-radius: 14px !important;
+  box-shadow: 0 8px 20px rgba(169, 70, 61, .08);
+}
+.notification-feedback { margin: 18px 0; }
+.notification-list { margin-top: 18px; }
+.notification-item {
+  padding: 18px 20px !important;
+  border-left-width: 4px !important;
+  cursor: pointer;
+  transition: transform 160ms var(--ease-out), box-shadow 180ms var(--ease-out), background-color 160ms ease, opacity 160ms ease !important;
+}
+.notification-item.severity-info { border-left-color: #6c8b9b !important; }
+.notification-item.severity-success { border-left-color: #5a7c5e !important; }
+.notification-item.severity-warning { border-left-color: #d2a13a !important; }
+.notification-item.severity-critical { border-left-color: #b06158 !important; }
+.notification-item:hover { transform: translateY(-1px); box-shadow: var(--soft-shadow); }
+.notification-item.is-unread { background: #ffffff; }
+.notification-item.is-read { background: #f5f7f3; }
+.notification-item-row { align-items: flex-start; gap: 20px; }
+.notification-item-copy { min-width: 0; flex: 1; }
+.notification-item-copy h6 { margin-bottom: 6px; font-size: 1rem; line-height: 1.3; }
+.notification-item-copy > p { max-width: 720px; line-height: 1.55; }
+.notification-item-meta { min-width: 195px; display: flex; align-items: flex-end; flex-direction: column; gap: 10px; }
+.notification-item-meta small { color: var(--muted); font-size: .72rem; white-space: nowrap; }
+.notification-item-meta .MuiButton-root { min-height: 34px; padding-inline: 12px; font-size: .75rem; }
+
+@media (max-width: 700px) {
+  .date-range-caption { align-self: flex-start; margin-left: 2px !important; }
+  .notification-item-row { gap: 12px; }
+  .notification-item-meta { width: 100%; min-width: 0; align-items: flex-start; }
+  .notification-item-meta small { white-space: normal; }
+}

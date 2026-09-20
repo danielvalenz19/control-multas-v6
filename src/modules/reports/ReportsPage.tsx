@@ -31,8 +31,10 @@ export default function ReportsPage({ initialType="infractions" }: { initialType
   const [result,setResult]=useState<ReportResponse|null>(null);
   const [loading,setLoading]=useState(true);
   const [error,setError]=useState("");
+  const rangeError=validateDateRange(from,to);
   useEffect(()=>{
     let active=true;
+    if(rangeError){setLoading(false);setError("");return()=>{active=false;};}
     setLoading(true);
     setError("");
     void analyticsApi.report(type,query(from,to,page+1,pageSize,status,search))
@@ -40,20 +42,20 @@ export default function ReportsPage({ initialType="infractions" }: { initialType
       .catch((reason:unknown)=>{if(active)setError(reason instanceof Error?reason.message:"No se pudo cargar el reporte.");})
       .finally(()=>{if(active)setLoading(false);});
     return()=>{active=false;};
-  },[type,from,to,page,pageSize,status,search]);
-  const exportCsv=()=>{const params=query(from,to,1,pageSize,status,search);void analyticsApi.download(`/reports/${type}/export.csv?${params.toString()}`,`${type}-${from}-${to}.csv`).catch(showError(setError));};
-  const exportPdf=()=>{const params=new URLSearchParams({from,to});void analyticsApi.download(`/reports/dashboard-summary.pdf?${params.toString()}`,`resumen-${from}-${to}.pdf`).catch(showError(setError));};
+  },[type,from,to,page,pageSize,status,search,rangeError]);
+  const exportCsv=()=>{if(rangeError)return;const params=query(from,to,1,pageSize,status,search);void analyticsApi.download(`/reports/${type}/export.csv?${params.toString()}`,`${type}-${from}-${to}.csv`).catch(showError(setError));};
+  const exportPdf=()=>{if(rangeError)return;const params=new URLSearchParams({from,to});void analyticsApi.download(`/reports/dashboard-summary.pdf?${params.toString()}`,`resumen-${from}-${to}.pdf`).catch(showError(setError));};
   return <Box className="module-page">
-    <PageHeader eyebrow="Análisis institucional" title={initialType==="audit"?"Auditoría":"Reportes operativos y financieros"} description="Datos paginados desde MySQL. Las exportaciones conservan el rango y filtros seleccionados." action={<Stack direction="row" spacing={1}><Button variant="outlined" startIcon={<DownloadRoundedIcon/>} onClick={exportCsv}>CSV UTF-8</Button><Button variant="outlined" startIcon={<PictureAsPdfRoundedIcon/>} onClick={exportPdf}>Resumen PDF</Button></Stack>}/>
+    <PageHeader eyebrow="Análisis institucional" title={initialType==="audit"?"Auditoría":"Reportes operativos y financieros"} description="Datos paginados desde MySQL. Las exportaciones conservan el rango y filtros seleccionados." action={<Stack direction="row" spacing={1}><Button variant="outlined" disabled={Boolean(rangeError)} startIcon={<DownloadRoundedIcon/>} onClick={exportCsv}>CSV UTF-8</Button><Button variant="outlined" disabled={Boolean(rangeError)} startIcon={<PictureAsPdfRoundedIcon/>} onClick={exportPdf}>Resumen PDF</Button></Stack>}/>
     <Paper variant="outlined" className="filter-bar">
       <FormControl><InputLabel>Reporte</InputLabel><Select label="Reporte" value={type} onChange={(event)=>{setType(event.target.value);setPage(0);}}>{options.map(([value,name])=><MenuItem key={value} value={value}>{name}</MenuItem>)}</Select></FormControl>
-      <TextField type="date" label="Desde" value={from} onChange={(event)=>{setFrom(event.target.value);setPage(0);}} slotProps={{inputLabel:{shrink:true}}}/>
-      <TextField type="date" label="Hasta" value={to} onChange={(event)=>{setTo(event.target.value);setPage(0);}} slotProps={{inputLabel:{shrink:true}}}/>
+      <TextField className="date-range-field" type="date" label="Desde" value={from} error={Boolean(rangeError)} onChange={(event)=>{setFrom(event.target.value);setPage(0);}} helperText={rangeError || "Inicio del periodo"} slotProps={{inputLabel:{shrink:true},htmlInput:{max:to}}}/>
+      <TextField className="date-range-field" type="date" label="Hasta" value={to} error={Boolean(rangeError)} onChange={(event)=>{setTo(event.target.value);setPage(0);}} helperText={rangeError || "Fin del periodo"} slotProps={{inputLabel:{shrink:true},htmlInput:{min:from}}}/>
       <TextField label="Estado" value={status} onChange={(event)=>{setStatus(event.target.value);setPage(0);}}/>
       <TextField label="Buscar" value={search} onChange={(event)=>{setSearch(event.target.value);setPage(0);}}/>
     </Paper>
-    {error&&<Alert severity="error">{error}</Alert>}
-    {loading?<Box sx={{display:"grid",placeItems:"center",height:240}}><CircularProgress/></Box>:<Paper variant="outlined" className="data-table-card">
+    {rangeError&&<Alert className="range-alert" severity="error">{rangeError}</Alert>}{error&&<Alert className="range-alert" severity="error">{error}</Alert>}
+    {rangeError?null:loading?<Box sx={{display:"grid",placeItems:"center",height:240}}><CircularProgress/></Box>:<Paper variant="outlined" className="data-table-card">
       <TableContainer><Table size="small"><TableHead><TableRow>{result?.meta.columns.map((column)=><TableCell key={column}>{label(column)}</TableCell>)}</TableRow></TableHead><TableBody>
         {result?.data.map((row,index)=><TableRow key={String(row.id??row.boleta??row.pago??index)} hover>{result.meta.columns.map((column)=><TableCell key={column}>{format(row[column])}</TableCell>)}</TableRow>)}
         {result?.data.length===0&&<TableRow><TableCell colSpan={result.meta.columns.length||1}>No hay registros para los filtros seleccionados.</TableCell></TableRow>}
@@ -72,3 +74,12 @@ function query(from:string,to:string,page:number,pageSize:number,status:string,s
 function label(value:string){return value.replaceAll("_"," ").replace(/^./,(letter)=>letter.toUpperCase());}
 function format(value:unknown){if(value===null||value===undefined||value==="")return "—";if(typeof value==="string"&&/^\d{4}-\d{2}-\d{2}T/.test(value))return new Date(value).toLocaleString("es-GT");return typeof value==="object"?JSON.stringify(value):String(value);}
 function showError(setError:(message:string)=>void){return(reason:unknown)=>setError(reason instanceof Error?reason.message:"No se pudo exportar.");}
+function validateDateRange(from:string,to:string){
+  if(!from||!to)return "Selecciona las dos fechas del periodo.";
+  const start=new Date(`${from}T00:00:00Z`).getTime(); const end=new Date(`${to}T00:00:00Z`).getTime();
+  if(Number.isNaN(start)||Number.isNaN(end))return "Introduce fechas válidas.";
+  const days=Math.floor((end-start)/86_400_000)+1;
+  if(days<1)return "La fecha Desde no puede ser posterior a Hasta.";
+  if(days>366)return "El rango debe contener entre 1 y 366 días.";
+  return "";
+}

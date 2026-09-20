@@ -1015,6 +1015,14 @@ describe.skipIf(!enabled)("MySQL real sin residuos", () => {
       const paymentMethod = await request(app).post("/api/v1/payment-methods").set("Cookie", cookie).send({ code: methodCode, name: `Efectivo ${marker}`, isCash: true });
       expect(paymentMethod.status).toBe(201);
       const paymentMethodId = (paymentMethod.body as { data: { id: string } }).data.id;
+      // La semilla QA deja correlativos operativos para que el portal pueda probarse.
+      // Este caso necesita ejercer la creación de esos tres correlativos dentro de
+      // su propia transacción; se retiran solo dentro del fixture y el rollback los
+      // restaura al terminar la prueba.
+      await database.query(
+        "DELETE FROM document_sequences WHERE site_id=? AND sequence_year=? AND document_type IN ('PAYMENT_RECEIPT','SOLVENCY_REQUEST','SOLVENCY')",
+        [sites[0]?.id, currentYear],
+      );
       expect(
         (
           await request(app).post("/api/v1/catalogs/document-sequences").set("Cookie", cookie).send({
