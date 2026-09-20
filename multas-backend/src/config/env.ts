@@ -29,6 +29,7 @@ const envSchema = z
     RATE_LIMIT_MAX: z.coerce.number().int().min(1).default(100),
     PUBLIC_RATE_LIMIT_WINDOW_MS: z.coerce.number().int().min(1_000).default(60_000),
     PUBLIC_RATE_LIMIT_MAX: z.coerce.number().int().min(1).default(20),
+    PUBLIC_PAYMENT_RATE_LIMIT_MAX: z.coerce.number().int().min(1).default(60),
     SESSION_COOKIE_NAME: z.string().regex(/^[a-zA-Z0-9_-]+$/).default("pmt_session"),
     SESSION_SAME_SITE: z.enum(["strict", "lax", "none"]).default("lax"),
     SESSION_TTL_HOURS: z.coerce.number().int().min(1).max(168).default(12),
@@ -42,6 +43,10 @@ const envSchema = z
     HISTORICAL_MIGRATION_DIR: z.string().min(1).default("storage/private/historical-migrations"),
     HISTORICAL_MIGRATION_MAX_BYTES: z.coerce.number().int().min(1_024).max(100_000_000).default(20_000_000),
     HISTORICAL_MIGRATION_RETENTION_DAYS: z.coerce.number().int().min(1).max(3_650).default(90),
+    PUBLIC_APP_URL: z.url().default("http://127.0.0.1:5173"),
+    PAYMENT_GATEWAY_MODE: z.enum(["disabled", "test", "external"]).default("disabled"),
+    PAYMENT_GATEWAY_BASE_URL: z.union([z.literal(""), z.url()]).default(""),
+    PAYMENT_GATEWAY_WEBHOOK_SECRET: z.string().default(""),
   })
   .superRefine((value, context) => {
     if (value.SESSION_SAME_SITE === "none" && value.NODE_ENV !== "production") {
@@ -50,6 +55,15 @@ const envSchema = z
         path: ["SESSION_SAME_SITE"],
         message: "SameSite=None solo se admite en producción con cookie Secure.",
       });
+    }
+    if (value.PAYMENT_GATEWAY_MODE === "test" && value.NODE_ENV === "production") {
+      context.addIssue({ code: "custom", path: ["PAYMENT_GATEWAY_MODE"], message: "El modo de pruebas del gateway no se permite en producción." });
+    }
+    if (value.PAYMENT_GATEWAY_MODE === "external" && !value.PAYMENT_GATEWAY_BASE_URL) {
+      context.addIssue({ code: "custom", path: ["PAYMENT_GATEWAY_BASE_URL"], message: "El gateway externo requiere PAYMENT_GATEWAY_BASE_URL." });
+    }
+    if (value.PAYMENT_GATEWAY_MODE === "external" && value.PAYMENT_GATEWAY_WEBHOOK_SECRET.length < 16) {
+      context.addIssue({ code: "custom", path: ["PAYMENT_GATEWAY_WEBHOOK_SECRET"], message: "El gateway externo requiere un secreto de webhook de al menos 16 caracteres." });
     }
   })
   .transform((value) => ({

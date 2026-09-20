@@ -14,6 +14,8 @@ const files: Record<string, string> = {
   "011": "database/migrations/011_dashboard_reports_notifications.sql",
   "012": "database/migrations/012_notification_preferences_rbac.sql",
   "013": "database/migrations/013_historical_migrations.sql",
+  "014": "database/migrations/014_online_payment_intents.sql",
+  "015": "database/migrations/015_payment_order_paid_snapshot.sql",
 };
 const tablesByMigration: Record<string, Set<string>> = {
   "004": new Set(["citizens", "vehicles", "vehicle_ownerships", "driver_licenses"]),
@@ -26,6 +28,8 @@ const tablesByMigration: Record<string, Set<string>> = {
   "011": new Set(["notification_templates", "user_notification_preferences", "notifications", "notification_outbox"]),
   "012": new Set(),
   "013": new Set(["migration_batches", "migration_files", "migration_staging_rows", "migration_validation_errors", "migration_conflicts", "migration_entity_mappings", "migration_execution_logs", "legacy_source_references"]),
+  "014": new Set(["payment_intents", "payment_webhook_events"]),
+  "015": new Set(),
 };
 
 await withContainer(async ({ schema, database, logger }) => {

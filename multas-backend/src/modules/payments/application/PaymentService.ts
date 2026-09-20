@@ -3,6 +3,7 @@ import type { PoolConnection, ResultSetHeader, RowDataPacket } from "mysql2/prom
 import { centsToDecimal, decimalToCents, normalizeMoney } from "../../../shared/domain/Money.js";
 import { HttpError } from "../../../shared/http/HttpError.js";
 import type { MySqlDatabase } from "../../../shared/infrastructure/mysql/MySqlConnection.js";
+import type { Env } from "../../../config/env.js";
 
 type PaymentRow = RowDataPacket & {
   id: number;
@@ -11,8 +12,8 @@ type PaymentRow = RowDataPacket & {
   order_number: string;
   infraction_id: number;
   ticket_number: string;
-  cash_session_id: number;
-  cash_desk_name: string;
+  cash_session_id: number | null;
+  cash_desk_name: string | null;
   payment_method_id: number;
   payment_method_name: string;
   is_cash: number;
@@ -44,11 +45,33 @@ type ReconciliationRow = RowDataPacket & {
 export type PaymentActor = { userId: number; requestId: string };
 export type PaymentView = {
   id: string; reference: string; paymentOrderId: string; orderNumber: string; infractionId: string; ticketNumber: string;
-  cashSessionId: string; cashDesk: string; paymentMethodId: string; paymentMethod: string; amount: string; currency: string;
+  cashSessionId: string | null; cashDesk: string | null; paymentMethodId: string; paymentMethod: string; amount: string; currency: string;
   externalReference: string | null; status: "REGISTERED" | "CONFIRMED"; createdAt: Date; confirmedAt: Date | null;
   receipt: { number: string; issuedAt: Date | null; copyCount: number } | null;
   reversal: { id: string; reference: string | null; reason: string | null; reversedAt: Date | null } | null;
 };
+
+export type OnlinePaymentIntentView = {
+  id: string;
+  reference: string;
+  orderNumber: string;
+  paymentOrderReference: string;
+  paymentMethod: "CARD" | "VISA_LINK";
+  providerCode: string;
+  status: "PENDING" | "SUCCEEDED" | "FAILED" | "EXPIRED" | "CANCELLED";
+  amount: string;
+  currency: string;
+  checkoutUrl: string;
+  providerPaymentId: string | null;
+  paymentId: string | null;
+  receiptNumber: string | null;
+  expiresAt: Date;
+  createdAt: Date;
+  completedAt: Date | null;
+  testMode: boolean;
+};
+
+export type OnlinePaymentConfig = Pick<Env, "PAYMENT_GATEWAY_MODE" | "PAYMENT_GATEWAY_BASE_URL" | "PUBLIC_APP_URL">;
 
 export class PaymentService {
   public constructor(private readonly database: MySqlDatabase) {}
@@ -75,9 +98,124 @@ export class PaymentService {
               i.ticket_number,i.vehicle_plate_snapshot
        FROM payment_orders po JOIN infractions i ON i.id=po.infraction_id
        LEFT JOIN payments p ON p.payment_order_id=po.id
-       WHERE po.status='ISSUED' AND po.expires_at>UTC_TIMESTAMP(3) AND p.id IS NULL
+       LEFT JOIN payment_intents pi ON pi.payment_order_id=po.id AND pi.status='PENDING' AND pi.expires_at>UTC_TIMESTAMP(3)
+       WHERE po.status='ISSUED' AND po.expires_at>UTC_TIMESTAMP(3) AND p.id IS NULL AND pi.id IS NULL
        ORDER BY po.issued_at DESC LIMIT 200`,
     );
+  }
+
+  public async createOnlinePaymentIntent(
+    input: { paymentOrderReference: string; paymentMethod: "CARD" | "VISA_LINK"; idempotencyKey: string; requestId: string },
+    config: OnlinePaymentConfig,
+  ): Promise<{ intent: OnlinePaymentIntentView; replay: boolean }> {
+    const providerCode = input.paymentMethod === "CARD" ? "CARD_ONLINE" : "VISA_LINK";
+    const idempotencyKeyHash = sha256(input.idempotencyKey);
+    return this.database.withTransaction(async (connection) => {
+      const [orders] = await connection.query<(RowDataPacket & { id: number; public_reference: string; order_number: string; infraction_id: number; pending_balance_snapshot: string; status: string; expires_at: Date })[]>(
+        "SELECT id,public_reference,order_number,infraction_id,pending_balance_snapshot,status,expires_at FROM payment_orders WHERE public_reference=? FOR UPDATE",
+        [input.paymentOrderReference],
+      );
+      const order = orders[0];
+      if (!order) throw new HttpError({ code: "PUBLIC_PAYMENT_ORDER_NOT_FOUND", message: "No se encontró la orden de pago solicitada.", statusCode: 404 });
+      const [methodRows] = await connection.query<(RowDataPacket & { id: number; code: string; is_active: number })[]>(
+        "SELECT id,code,is_active FROM payment_methods WHERE code=? FOR UPDATE", [providerCode],
+      );
+      const method = methodRows[0];
+      if (!method) throw new HttpError({ code: "ONLINE_PAYMENT_METHOD_NOT_CONFIGURED", message: "El método de pago en línea todavía no está configurado.", statusCode: 503 });
+      const [existing] = await connection.query<(RowDataPacket & { id: number })[]>(
+        `SELECT id FROM payment_intents WHERE payment_order_id=? AND payment_method_id=? AND idempotency_key_hash=? LIMIT 1 FOR UPDATE`,
+        [order.id, method.id, idempotencyKeyHash],
+      );
+      if (existing[0]) return { intent: await this.loadOnlineIntent(connection, existing[0].id, config.PAYMENT_GATEWAY_MODE === "test"), replay: true };
+      if (order.status !== "ISSUED") throw new HttpError({ code: "PAYMENT_ORDER_NOT_PAYABLE", message: "La orden ya no está disponible para iniciar un pago.", statusCode: 409 });
+      if (!method.is_active) throw new HttpError({ code: "ONLINE_PAYMENT_METHOD_NOT_CONFIGURED", message: "El método de pago en línea todavía no está configurado.", statusCode: 503 });
+      if (new Date(order.expires_at).getTime() <= Date.now()) throw new HttpError({ code: "PAYMENT_ORDER_EXPIRED", message: "La orden de pago está vencida.", statusCode: 409 });
+      const [active] = await connection.query<(RowDataPacket & { id: number })[]>(
+        `SELECT id FROM payment_intents WHERE payment_order_id=? AND status='PENDING' AND expires_at>UTC_TIMESTAMP(3) ORDER BY created_at DESC LIMIT 1 FOR UPDATE`,
+        [order.id],
+      );
+      if (active[0]) return { intent: await this.loadOnlineIntent(connection, active[0].id, config.PAYMENT_GATEWAY_MODE === "test"), replay: true };
+      if (config.PAYMENT_GATEWAY_MODE === "disabled") throw new HttpError({ code: "ONLINE_PAYMENT_UNAVAILABLE", message: "El pago en línea aún no está habilitado para esta municipalidad.", statusCode: 503 });
+      const balance = await calculateBalance(connection, order.infraction_id);
+      if (balance.pendingBalance === "0.00" || balance.pendingBalance !== normalizeMoney(order.pending_balance_snapshot)) throw new HttpError({ code: "PAYMENT_BALANCE_CHANGED", message: "El saldo de la orden cambió; genera una orden nueva.", statusCode: 409 });
+      const expiresAt = new Date(Math.min(new Date(order.expires_at).getTime(), Date.now() + 30 * 60 * 1000));
+      const publicReference = randomReference();
+      const checkoutUrl = buildCheckoutUrl(config, publicReference, balance.pendingBalance, expiresAt);
+      const [created] = await connection.query<ResultSetHeader>(
+        `INSERT INTO payment_intents (public_reference,payment_order_id,payment_method_id,provider_code,status,amount,checkout_url,idempotency_key_hash,expires_at,created_request_id)
+         VALUES (?,?,?,?, 'PENDING',?,?,?,?,?)`,
+        [publicReference, order.id, method.id, providerCode, balance.pendingBalance, checkoutUrl, idempotencyKeyHash, expiresAt, input.requestId],
+      );
+      return { intent: await this.loadOnlineIntent(connection, created.insertId, config.PAYMENT_GATEWAY_MODE === "test"), replay: false };
+    });
+  }
+
+  public async getOnlinePaymentIntent(reference: string, config: OnlinePaymentConfig): Promise<OnlinePaymentIntentView> {
+    return this.loadOnlineIntent(this.database, reference, config.PAYMENT_GATEWAY_MODE === "test", true);
+  }
+
+  public async listOnlinePaymentIntents(): Promise<RowDataPacket[]> {
+    return this.database.query<RowDataPacket[]>(
+      `SELECT pi.id,pi.public_reference,pi.provider_code,pi.status,pi.amount,pi.currency,pi.provider_payment_id,pi.expires_at,pi.created_at,pi.completed_at,
+              po.order_number,po.public_reference payment_order_reference,pr.receipt_number
+       FROM payment_intents pi JOIN payment_orders po ON po.id=pi.payment_order_id
+       LEFT JOIN payment_receipts pr ON pr.payment_id=pi.payment_id
+       ORDER BY pi.created_at DESC LIMIT 200`,
+    );
+  }
+
+  public async completeOnlinePaymentIntent(reference: string, providerPaymentId: string, actor: PaymentActor): Promise<PaymentView> {
+    return this.database.withTransaction(async (connection) => {
+      const [intentRows] = await connection.query<(RowDataPacket & { id: number; payment_id: number | null; payment_order_id: number; payment_method_id: number; amount: string; status: string; expires_at: Date; provider_payment_id: string | null })[]>(
+        "SELECT id,payment_id,payment_order_id,payment_method_id,amount,status,expires_at,provider_payment_id FROM payment_intents WHERE public_reference=? FOR UPDATE", [reference],
+      );
+      const intent = intentRows[0];
+      if (!intent) throw new HttpError({ code: "ONLINE_PAYMENT_INTENT_NOT_FOUND", message: "El enlace de pago no existe o ya no está disponible.", statusCode: 404 });
+      if (intent.status === "SUCCEEDED" && intent.payment_id) return paymentDto(await this.loadPayment(connection, intent.payment_id));
+      if (intent.status !== "PENDING") throw new HttpError({ code: "ONLINE_PAYMENT_INTENT_NOT_PENDING", message: "El intento de pago ya fue resuelto y no admite otra confirmación.", statusCode: 409 });
+      if (new Date(intent.expires_at).getTime() <= Date.now()) {
+        await connection.query("UPDATE payment_intents SET status='EXPIRED',last_error='El enlace de pago venció' WHERE id=?", [intent.id]);
+        throw new HttpError({ code: "ONLINE_PAYMENT_INTENT_EXPIRED", message: "El enlace de pago venció; genera uno nuevo.", statusCode: 409 });
+      }
+      const [orders] = await connection.query<(RowDataPacket & { status: string; expires_at: Date; infraction_id: number; site_id: number })[]>(
+        `SELECT po.status,po.expires_at,po.infraction_id,i.site_id FROM payment_orders po JOIN infractions i ON i.id=po.infraction_id WHERE po.id=? FOR UPDATE`, [intent.payment_order_id],
+      );
+      const order = orders[0];
+      if (order?.status !== "ISSUED") throw new HttpError({ code: "PAYMENT_ORDER_NOT_PAYABLE", message: "La orden ya no está disponible para pago.", statusCode: 409 });
+      if (new Date(order.expires_at).getTime() <= Date.now()) throw new HttpError({ code: "PAYMENT_ORDER_EXPIRED", message: "La orden de pago está vencida.", statusCode: 409 });
+      await connection.query("SELECT id FROM infractions WHERE id=? FOR UPDATE", [order.infraction_id]);
+      const balance = await calculateBalance(connection, order.infraction_id);
+      if (normalizeMoney(intent.amount) !== balance.pendingBalance) throw new HttpError({ code: "PAYMENT_BALANCE_CHANGED", message: "El saldo cambió; el pago en línea no puede confirmarse con este enlace.", statusCode: 409 });
+      const [created] = await connection.query<ResultSetHeader>(
+        `INSERT INTO payments (public_reference,payment_order_id,cash_session_id,payment_method_id,amount,external_reference,status,created_by_user_id,created_request_id,confirmed_by_user_id,confirmation_request_id,confirmed_at)
+         VALUES (?,?,NULL,?,?,?,'CONFIRMED',?,?,?,?,UTC_TIMESTAMP(3))`,
+        [randomReference(), intent.payment_order_id, intent.payment_method_id, intent.amount, providerPaymentId, actor.userId, actor.requestId, actor.userId, actor.requestId],
+      );
+      await connection.query("INSERT INTO payment_allocations (payment_id,infraction_id,amount) VALUES (?,?,?)", [created.insertId, order.infraction_id, intent.amount]);
+      const receiptNumber = await nextDocumentNumber(connection, order.site_id, "PAYMENT_RECEIPT", new Date().getUTCFullYear());
+      await connection.query("INSERT INTO payment_receipts (payment_id,receipt_number,issued_by_user_id,original_request_id) VALUES (?,?,?,?)", [created.insertId, receiptNumber, actor.userId, actor.requestId]);
+      await connection.query("UPDATE payment_orders SET status='USED',used_at=UTC_TIMESTAMP(3),payment_total_snapshot=?,pending_balance_snapshot='0.00' WHERE id=? AND status='ISSUED'", [centsToDecimal(decimalToCents(balance.paymentTotal) + decimalToCents(intent.amount)), intent.payment_order_id]);
+      await connection.query("INSERT INTO payment_order_status_history (payment_order_id,from_status,to_status,action,request_id) VALUES (?,'ISSUED','USED','ONLINE_PAYMENT_CONFIRMED',?)", [intent.payment_order_id, actor.requestId]);
+      await connection.query("UPDATE payment_intents SET status='SUCCEEDED',provider_payment_id=?,payment_id=?,completed_at=UTC_TIMESTAMP(3),last_error=NULL WHERE id=?", [providerPaymentId, created.insertId, intent.id]);
+      return paymentDto(await this.loadPayment(connection, created.insertId));
+    });
+  }
+
+  public async failOnlinePaymentIntent(reference: string, reason: string): Promise<OnlinePaymentIntentView> {
+    return this.database.withTransaction(async (connection) => {
+      const [rows] = await connection.query<(RowDataPacket & { id: number; status: string })[]>("SELECT id,status FROM payment_intents WHERE public_reference=? FOR UPDATE", [reference]);
+      if (!rows[0]) throw new HttpError({ code: "ONLINE_PAYMENT_INTENT_NOT_FOUND", message: "El enlace de pago no existe.", statusCode: 404 });
+      if (rows[0].status === "PENDING") await connection.query("UPDATE payment_intents SET status='FAILED',last_error=? WHERE id=?", [reason, rows[0].id]);
+      return this.loadOnlineIntent(connection, rows[0].id, false);
+    });
+  }
+
+  public async resolveSystemActor(): Promise<number> {
+    const rows = await this.database.query<(RowDataPacket & { id: number })[]>(
+      `SELECT u.id FROM users u JOIN user_roles ur ON ur.user_id=u.id JOIN roles r ON r.id=ur.role_id WHERE u.status='ACTIVE' AND r.code='ADMIN' ORDER BY u.id LIMIT 1`,
+    );
+    if (!rows[0]) throw new HttpError({ code: "ONLINE_PAYMENT_SYSTEM_ACTOR_UNAVAILABLE", message: "No hay un usuario institucional disponible para confirmar el pago.", statusCode: 503 });
+    return rows[0].id;
   }
 
   public async openCashSession(input: { cashDeskId: number; openingAmount: string }, actor: PaymentActor) {
@@ -231,6 +369,7 @@ export class PaymentService {
       if (replay) return { payment: paymentDto(await this.loadPayment(connection, replay)), replay: true };
       const payment = await this.loadPayment(connection, paymentId, true);
       if (payment.status === "CONFIRMED") return { payment: paymentDto(payment), replay: true };
+      if (payment.cash_session_id === null) throw new HttpError({ code: "ONLINE_PAYMENT_CONFIRMATION_REQUIRED", message: "Los pagos en línea se confirman exclusivamente mediante el proveedor autorizado.", statusCode: 409 });
       const [sessions] = await connection.query<RowDataPacket[]>("SELECT id,status FROM cash_sessions WHERE id=? FOR UPDATE", [payment.cash_session_id]);
       if (sessions[0]?.["status"] !== "OPEN") throw new HttpError({ code: "CASH_SESSION_NOT_OPEN", message: "El turno asociado al pago ya no está abierto.", statusCode: 409 });
       const [orders] = await connection.query<(RowDataPacket & { status: string; expires_at: Date; infraction_id: number; site_id: number })[]>(
@@ -257,7 +396,7 @@ export class PaymentService {
          VALUES (?,'PAYMENT','IN',?,?,'Pago confirmado contra orden vigente',?,?)`,
         [payment.cash_session_id, payment.amount, paymentId, actor.userId, actor.requestId],
       );
-      await connection.query("UPDATE payment_orders SET status='USED',used_at=UTC_TIMESTAMP(3) WHERE id=? AND status='ISSUED'", [payment.payment_order_id]);
+      await connection.query("UPDATE payment_orders SET status='USED',used_at=UTC_TIMESTAMP(3),payment_total_snapshot=?,pending_balance_snapshot='0.00' WHERE id=? AND status='ISSUED'", [centsToDecimal(decimalToCents(balance.paymentTotal) + decimalToCents(payment.amount)), payment.payment_order_id]);
       await connection.query(
         "INSERT INTO payment_order_status_history (payment_order_id,from_status,to_status,action,request_id) VALUES (?,'ISSUED','USED','PAYMENT_CONFIRMED',?)",
         [payment.payment_order_id, actor.requestId],
@@ -275,6 +414,7 @@ export class PaymentService {
       const payment = await this.loadPayment(connection, paymentId, true);
       if (payment.status !== "CONFIRMED") throw new HttpError({ code: "PAYMENT_NOT_CONFIRMED", message: "Solo se puede reversar un pago confirmado.", statusCode: 409 });
       if (payment.reversal_id !== null) throw new HttpError({ code: "PAYMENT_ALREADY_REVERSED", message: "El pago ya tiene una contrapartida de reverso.", statusCode: 409 });
+      if (payment.cash_session_id === null) throw new HttpError({ code: "ONLINE_PAYMENT_REVERSAL_REQUIRES_GATEWAY", message: "Un pago en línea debe reversarse en la pasarela autorizada antes de reflejar el cambio en el sistema.", statusCode: 409 });
       const [sessions] = await connection.query<(RowDataPacket & { id: number })[]>(
         "SELECT id FROM cash_sessions WHERE cashier_user_id=? AND status='OPEN' FOR UPDATE", [actor.userId]);
       if (!sessions[0]) throw new HttpError({ code: "CASH_SESSION_REQUIRED", message: "Debe existir un turno abierto para registrar la contrapartida.", statusCode: 409 });
@@ -300,6 +440,8 @@ export class PaymentService {
           [solvency.id, observationReason, actor.userId, actor.requestId],
         );
       }
+      const reversedBalance = await calculateBalance(connection, payment.infraction_id);
+      await connection.query("UPDATE payment_orders SET payment_total_snapshot=?,pending_balance_snapshot=? WHERE id=?", [reversedBalance.paymentTotal, reversedBalance.pendingBalance, payment.payment_order_id]);
       await this.saveIdempotent(connection, actor.userId, "PAYMENT_REVERSE", idempotencyKey, requestHash, paymentId, 200);
       return { payment: paymentDto(await this.loadPayment(connection, paymentId)), replay: false };
     });
@@ -438,6 +580,22 @@ export class PaymentService {
       [userId, scope, sha256(key), requestHash, resourceId, status],
     );
   }
+
+  private async loadOnlineIntent(database: Queryable, value: number | string, testMode: boolean, byReference = false): Promise<OnlinePaymentIntentView> {
+    const rows = await queryRows<(RowDataPacket & { id: number; public_reference: string; order_number: string; payment_order_reference: string; provider_code: string; status: OnlinePaymentIntentView["status"]; amount: string; currency: string; checkout_url: string; provider_payment_id: string | null; payment_id: number | null; receipt_number: string | null; expires_at: Date; created_at: Date; completed_at: Date | null })[]>(database,
+      `SELECT pi.id,pi.public_reference,po.order_number,po.public_reference payment_order_reference,pi.provider_code,pi.status,pi.amount,pi.currency,pi.checkout_url,pi.provider_payment_id,pi.payment_id,pr.receipt_number,pi.expires_at,pi.created_at,pi.completed_at
+       FROM payment_intents pi JOIN payment_orders po ON po.id=pi.payment_order_id LEFT JOIN payment_receipts pr ON pr.payment_id=pi.payment_id
+       WHERE ${byReference ? "pi.public_reference=?" : "pi.id=?"}`,
+      [value],
+    );
+    const row = rows[0];
+    if (!row) throw new HttpError({ code: "ONLINE_PAYMENT_INTENT_NOT_FOUND", message: "El enlace de pago no existe o ya no está disponible.", statusCode: 404 });
+    if (row.status === "PENDING" && new Date(row.expires_at).getTime() <= Date.now()) {
+      await queryRows(database, "UPDATE payment_intents SET status='EXPIRED',last_error='El enlace de pago venció' WHERE id=? AND status='PENDING'", [row.id]);
+      row.status = "EXPIRED";
+    }
+    return { id: String(row.id), reference: row.public_reference, orderNumber: row.order_number, paymentOrderReference: row.payment_order_reference, paymentMethod: row.provider_code === "VISA_LINK" ? "VISA_LINK" : "CARD", providerCode: row.provider_code, status: row.status, amount: normalizeMoney(row.amount), currency: row.currency, checkoutUrl: row.checkout_url, providerPaymentId: row.provider_payment_id, paymentId: row.payment_id === null ? null : String(row.payment_id), receiptNumber: row.receipt_number, expiresAt: row.expires_at, createdAt: row.created_at, completedAt: row.completed_at, testMode };
+  }
 }
 
 type Queryable = MySqlDatabase | PoolConnection;
@@ -484,15 +642,15 @@ function paymentSelect(): string {
                  pm.name payment_method_name,pm.is_cash,pr.receipt_number,pr.issued_at receipt_issued_at,pr.copy_count,
                  rv.id reversal_id,rv.reversal_reference,rv.reason reversal_reason,rv.reversed_at
           FROM payments p JOIN payment_orders po ON po.id=p.payment_order_id JOIN infractions i ON i.id=po.infraction_id
-          JOIN cash_sessions cs ON cs.id=p.cash_session_id JOIN cash_desks cd ON cd.id=cs.cash_desk_id
-          JOIN payment_methods pm ON pm.id=p.payment_method_id
-          LEFT JOIN payment_receipts pr ON pr.payment_id=p.id LEFT JOIN payment_reversals rv ON rv.payment_id=p.id`;
+                 LEFT JOIN cash_sessions cs ON cs.id=p.cash_session_id LEFT JOIN cash_desks cd ON cd.id=cs.cash_desk_id
+                 JOIN payment_methods pm ON pm.id=p.payment_method_id
+                 LEFT JOIN payment_receipts pr ON pr.payment_id=p.id LEFT JOIN payment_reversals rv ON rv.payment_id=p.id`;
 }
 
 function paymentDto(row: PaymentRow): PaymentView {
   return {
     id: String(row.id), reference: row.public_reference, paymentOrderId: String(row.payment_order_id), orderNumber: row.order_number,
-    infractionId: String(row.infraction_id), ticketNumber: row.ticket_number, cashSessionId: String(row.cash_session_id), cashDesk: row.cash_desk_name,
+    infractionId: String(row.infraction_id), ticketNumber: row.ticket_number, cashSessionId: row.cash_session_id === null ? null : String(row.cash_session_id), cashDesk: row.cash_desk_name,
     paymentMethodId: String(row.payment_method_id), paymentMethod: row.payment_method_name, amount: normalizeMoney(row.amount), currency: row.currency,
     externalReference: row.external_reference, status: row.status, createdAt: row.created_at, confirmedAt: row.confirmed_at,
     receipt: row.receipt_number ? { number: row.receipt_number, issuedAt: row.receipt_issued_at, copyCount: row.copy_count ?? 0 } : null,
@@ -509,3 +667,14 @@ function moneyError(message: string) { return new HttpError({ code: "MONEY_INVAL
 function randomReference(): string { return randomBytes(20).toString("hex"); }
 function sha256(value: string): string { return createHash("sha256").update(value).digest("hex"); }
 function isDuplicateKey(error: unknown): boolean { return typeof error === "object" && error !== null && "errno" in error && error.errno === 1062; }
+
+function buildCheckoutUrl(config: OnlinePaymentConfig, reference: string, amount: string, expiresAt: Date): string {
+  if (config.PAYMENT_GATEWAY_MODE === "test") return `${config.PUBLIC_APP_URL.replace(/\/$/, "")}/#/pago/checkout/${reference}`;
+  if (!config.PAYMENT_GATEWAY_BASE_URL) throw new HttpError({ code: "ONLINE_PAYMENT_GATEWAY_NOT_CONFIGURED", message: "El proveedor de pagos no está configurado.", statusCode: 503 });
+  const url = new URL(config.PAYMENT_GATEWAY_BASE_URL);
+  url.searchParams.set("intent", reference);
+  url.searchParams.set("amount", amount);
+  url.searchParams.set("currency", "GTQ");
+  url.searchParams.set("expiresAt", expiresAt.toISOString());
+  return url.toString();
+}

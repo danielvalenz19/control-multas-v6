@@ -1,8 +1,8 @@
 openapi: 3.1.0
 info:
   title: PMT Multas API - TANDAS 0–8, 10 y 11
-  version: 1.2.0
-  description: Contrato de autenticación, operación municipal, finanzas, solvencias, analítica, notificaciones y migración histórica controlada.
+  version: 1.3.0
+  description: Contrato de autenticación, operación municipal, pagos presenciales y en línea, solvencias, analítica, notificaciones y migración histórica controlada.
 servers:
   - url: /api/v1
 tags:
@@ -632,6 +632,62 @@ paths:
           description: Orden de pago PDF
           content: { application/pdf: { schema: { type: string, format: binary } } }
         '404': { $ref: '#/components/responses/Error' }
+  /public/payment-intents:
+    post:
+      tags: [Public portal]
+      summary: Crea un checkout alojado para tarjeta o enlace Visa sin recibir datos de tarjeta
+      parameters:
+        - in: header
+          name: Idempotency-Key
+          required: true
+          schema: { type: string, minLength: 8, maxLength: 200 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [paymentOrderReference, paymentMethod]
+              properties:
+                paymentOrderReference: { type: string, pattern: '^[a-f0-9]{40}$' }
+                paymentMethod: { type: string, enum: [CARD, VISA_LINK] }
+      responses:
+        '201': { description: Checkout creado; la respuesta incluye un enlace alojado y expiración }
+        '200': { description: Repetición idempotente o checkout vigente reutilizado }
+        '409': { $ref: '#/components/responses/Error' }
+        '503': { $ref: '#/components/responses/Error' }
+  /public/payment-intents/{reference}:
+    get:
+      tags: [Public portal]
+      summary: Consulta el estado del checkout y el eventual recibo
+      responses:
+        '200': { description: Estado del intento; nunca incluye datos de tarjeta }
+        '404': { $ref: '#/components/responses/Error' }
+  /public/payment-intents/{reference}/test-confirm:
+    post:
+      tags: [Public portal]
+      summary: Confirma un pago sintético únicamente en modo QA local
+      responses:
+        '200': { description: Pago confirmado y recibo emitido en entorno de pruebas }
+        '404': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+  /public/payment-gateways/{provider}/webhook:
+    post:
+      tags: [Payments]
+      summary: Recibe eventos firmados del proveedor externo de pagos
+      parameters:
+        - in: path
+          name: provider
+          required: true
+          schema: { type: string, enum: [CARD_ONLINE, VISA_LINK] }
+        - in: header
+          name: x-payment-signature
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: Evento aceptado o repetición idempotente }
+        '401': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
   /cash-registers:
     get:
       tags: [Cash]
@@ -724,6 +780,12 @@ paths:
           required: true
           schema: { type: string, minLength: 8, maxLength: 200 }
       responses: { '201': { description: Pago registrado sin recibo }, '200': { description: Repetición idempotente }, '409': { $ref: '#/components/responses/Error' } }
+  /payments/online-intents:
+    get:
+      tags: [Payments]
+      security: [{ sessionCookie: [] }]
+      summary: Lista checkouts y enlaces en línea para receptoría y supervisión
+      responses: { '200': { description: Intentos de pago con proveedor, estado y recibo eventual }, '403': { $ref: '#/components/responses/Error' } }
   /payments/{id}:
     get:
       tags: [Payments]

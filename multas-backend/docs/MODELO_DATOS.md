@@ -1,6 +1,13 @@
 # Modelo de datos
 
-El esquema `pmt_multas` conserva las 68 tablas del contrato previo. TANDA 10 reutiliza `notification_templates` y añade tres tablas, para un total de 71.
+El esquema `pmt_multas` conserva las tablas del contrato previo. TANDA 10 y migración histórica añadieron sus tablas de control; las migraciones 014–015 agregan el estado de checkout/webhooks y permiten que una orden usada conserve snapshot de saldo cero. El contrato local actual totaliza 81 tablas.
+
+## Tablas de pago en línea
+
+- `payment_intents`: intento idempotente asociado a una orden, método (`CARD_ONLINE`/`VISA_LINK`), monto, checkout alojado, proveedor, estado, expiración y eventual pago/recibo. No almacena datos de tarjeta.
+- `payment_webhook_events`: bitácora append-only de eventos del proveedor, hash del payload, firma verificada, estado de procesamiento y error. La clave `(provider_code,event_id)` evita procesar dos veces el mismo evento.
+
+`payments.cash_session_id` es nullable únicamente para pagos confirmados por proveedor externo; el pago presencial continúa requiriendo turno de caja. `payment_orders.pending_balance_snapshot` puede ser `0.00` cuando `status='USED'`, conservando el saldo original y el historial transaccional.
 
 ## Tablas TANDA 10
 

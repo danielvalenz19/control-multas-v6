@@ -11,7 +11,7 @@ export function InformationPage({ type }: { type: "requirements" | "help" | "faq
       items: [
         ["Consulta de multa", "Número completo de boleta y placa del vehículo."],
         ["Orden de pago", "Primero realiza una consulta válida; la orden no es recibo ni acredita pago."],
-        ["Pagos y solvencias", "Estos servicios pertenecen a fases futuras y todavía no reciben operaciones."],
+        ["Pagos y solvencias", "Puedes pagar con checkout alojado, generar un enlace Visa o acudir a receptoría; la solvencia solo se emite tras confirmar el pago."],
       ],
     },
     help: {
@@ -29,7 +29,7 @@ export function InformationPage({ type }: { type: "requirements" | "help" | "faq
       items: [
         ["¿Puedo consultar solo con la placa?", "No. Se exige boleta y placa para reducir la enumeración de datos."],
         ["¿La orden confirma un pago?", "No. Es una instrucción temporal y siempre está rotulada como no recibo."],
-        ["¿Puedo pagar en línea?", "No. Los cobros reales se implementarán en una fase posterior."],
+        ["¿Puedo pagar en línea?", "Sí, si la municipalidad tiene habilitado el proveedor. La tarjeta se captura en una página alojada y el sistema espera una confirmación firmada."],
       ],
     },
   }[type];

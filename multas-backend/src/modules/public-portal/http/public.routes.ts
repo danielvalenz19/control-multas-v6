@@ -1,5 +1,5 @@
-import { createHash, randomBytes } from "node:crypto";
-import { Router } from "express";
+import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+import { Router, type Request } from "express";
 import rateLimit from "express-rate-limit";
 import type { PoolConnection, ResultSetHeader, RowDataPacket } from "mysql2/promise";
 import { z } from "zod";
@@ -11,6 +11,7 @@ import { getRequestId } from "../../../shared/http/request-context.js";
 import { recordOperation } from "../../../shared/http/operations.js";
 import { createPublicSolvencyRouter } from "../../solvencies/http/solvency.routes.js";
 import type { MySqlDatabase } from "../../../shared/infrastructure/mysql/MySqlConnection.js";
+import { PaymentService } from "../../payments/application/PaymentService.js";
 
 const lookupInput = z.object({
   ticketNumber: z.string().trim().min(3).max(80),
@@ -18,6 +19,17 @@ const lookupInput = z.object({
 });
 const publicReferenceInput = z.string().regex(/^[a-f0-9]{40}$/);
 const idempotencyInput = z.string().trim().min(8).max(200);
+const onlineIntentInput = z.object({
+  paymentOrderReference: publicReferenceInput,
+  paymentMethod: z.enum(["CARD", "VISA_LINK"]),
+});
+const onlineWebhookInput = z.object({
+  eventId: z.string().trim().min(8).max(200),
+  intentReference: publicReferenceInput,
+  eventType: z.enum(["PAYMENT_SUCCEEDED", "PAYMENT_FAILED"]),
+  providerPaymentId: z.string().trim().min(3).max(200).optional(),
+  reason: z.string().trim().max(500).optional(),
+});
 
 type InfractionRow = RowDataPacket & {
   id: number;
@@ -44,17 +56,31 @@ type PaymentOrderRow = RowDataPacket & {
   status: string;
   issued_at: Date;
   expires_at: Date;
+  payment_status: string | null;
+  payment_reference: string | null;
+  receipt_number: string | null;
 };
 
 export function createPublicRouter(container: AppContainer): Router {
   const router = Router();
+  const payments = new PaymentService(container.database);
   router.use(rateLimit({
     windowMs: container.env.PUBLIC_RATE_LIMIT_WINDOW_MS,
     limit: container.env.PUBLIC_RATE_LIMIT_MAX,
+    skip: (request) => request.path.startsWith("/payment-intents") || request.path.startsWith("/payment-gateways/"),
     standardHeaders: "draft-8",
     legacyHeaders: false,
     handler(_request, _response, next) {
       next(new HttpError({ code: "PUBLIC_RATE_LIMIT_EXCEEDED", message: "No fue posible procesar más consultas en este momento.", statusCode: 429 }));
+    },
+  }));
+  router.use(["/payment-intents", "/payment-gateways"], rateLimit({
+    windowMs: container.env.PUBLIC_RATE_LIMIT_WINDOW_MS,
+    limit: container.env.PUBLIC_PAYMENT_RATE_LIMIT_MAX,
+    standardHeaders: "draft-8",
+    legacyHeaders: false,
+    handler(_request, _response, next) {
+      next(new HttpError({ code: "PUBLIC_PAYMENT_RATE_LIMIT_EXCEEDED", message: "El estado del pago se está consultando demasiado rápido. Espera un momento e inténtalo de nuevo.", statusCode: 429 }));
     },
   }));
   router.use("/solvencies", createPublicSolvencyRouter(container));
@@ -207,6 +233,72 @@ export function createPublicRouter(container: AppContainer): Router {
     } catch (error) { next(error); }
   });
 
+  router.post("/payment-intents", async (request, response, next) => {
+    try {
+      const input = onlineIntentInput.parse(request.body);
+      const idempotencyKey = idempotencyInput.parse(request.get("idempotency-key"));
+      const outcome = await payments.createOnlinePaymentIntent({ paymentOrderReference: input.paymentOrderReference, paymentMethod: input.paymentMethod, idempotencyKey, requestId: getRequestId() }, container.env);
+      await recordOperation(container, request, { action: outcome.replay ? "PUBLIC_PAYMENT_INTENT_REPLAYED" : "PUBLIC_PAYMENT_INTENT_CREATED", module: "public_portal", entityType: "payment_intent", entityId: outcome.intent.reference });
+      response.status(outcome.replay ? 200 : 201).json({ data: onlineIntentDto(outcome.intent), meta: { requestId: getRequestId(), idempotentReplay: outcome.replay } });
+    } catch (error) { next(error); }
+  });
+
+  router.get("/payment-intents/:reference", async (request, response, next) => {
+    try {
+      const reference = publicReferenceInput.parse(request.params.reference);
+      const data = await payments.getOnlinePaymentIntent(reference, container.env);
+      response.json({ data: onlineIntentDto(data), meta: { requestId: getRequestId() } });
+    } catch (error) { next(error); }
+  });
+
+  router.post("/payment-intents/:reference/test-confirm", async (request, response, next) => {
+    try {
+      if (container.env.PAYMENT_GATEWAY_MODE !== "test") throw new HttpError({ code: "ONLINE_PAYMENT_TEST_DISABLED", message: "La confirmación de pruebas solo está disponible en el entorno QA local.", statusCode: 404 });
+      const reference = publicReferenceInput.parse(request.params.reference);
+      const actorId = await payments.resolveSystemActor();
+      const payment = await payments.completeOnlinePaymentIntent(reference, `QA-${reference.slice(0, 16)}`, { userId: actorId, requestId: getRequestId() });
+      const intent = await payments.getOnlinePaymentIntent(reference, container.env);
+      await recordOperation(container, request, { action: "PUBLIC_PAYMENT_INTENT_TEST_CONFIRMED", module: "public_portal", entityType: "payment", entityId: payment.id });
+      response.json({ data: onlineIntentDto(intent), meta: { requestId: getRequestId(), testOnly: true } });
+    } catch (error) { next(error); }
+  });
+
+  router.post("/payment-gateways/:provider/webhook", async (request, response, next) => {
+    try {
+      if (container.env.PAYMENT_GATEWAY_MODE !== "external") throw new HttpError({ code: "PAYMENT_GATEWAY_WEBHOOK_DISABLED", message: "El webhook del proveedor no está habilitado en este entorno.", statusCode: 404 });
+      const provider = z.enum(["CARD_ONLINE", "VISA_LINK"]).parse(request.params.provider);
+      const signature = request.get("x-payment-signature") ?? "";
+      const rawPayload = ((request as Request & { rawBody?: Buffer }).rawBody ?? Buffer.from(JSON.stringify(request.body))).toString("utf8");
+      if (!verifyWebhookSignature(rawPayload, signature, container.env.PAYMENT_GATEWAY_WEBHOOK_SECRET)) throw new HttpError({ code: "PAYMENT_WEBHOOK_SIGNATURE_INVALID", message: "La firma del proveedor no es válida.", statusCode: 401 });
+      const input = onlineWebhookInput.parse(request.body);
+      const existing = await container.database.query<(RowDataPacket & { status: string })[]>("SELECT status FROM payment_webhook_events WHERE provider_code=? AND event_id=?", [provider, input.eventId]);
+      if (existing[0]?.status === "PROCESSED") return response.status(200).json({ data: { accepted: true, duplicate: true }, meta: { requestId: getRequestId() } });
+      const intents = await container.database.query<(RowDataPacket & { id: number; provider_code: string })[]>("SELECT id,provider_code FROM payment_intents WHERE public_reference=?", [input.intentReference]);
+      if (intents[0]?.provider_code !== provider) throw new HttpError({ code: "PAYMENT_WEBHOOK_INTENT_INVALID", message: "El intento no pertenece al proveedor indicado.", statusCode: 422 });
+      await container.database.query(
+        `INSERT INTO payment_webhook_events (provider_code,event_id,intent_id,event_type,payload_hash,signature_verified,status,provider_payment_id)
+         VALUES (?,?,?,?,?,1,'RECEIVED',?)
+         ON DUPLICATE KEY UPDATE signature_verified=1`,
+        [provider, input.eventId, intents[0].id, input.eventType, sha256(rawPayload), input.providerPaymentId ?? null],
+      );
+      if (input.eventType === "PAYMENT_SUCCEEDED") {
+        const actorId = await payments.resolveSystemActor();
+        await payments.completeOnlinePaymentIntent(input.intentReference, input.providerPaymentId ?? input.eventId, { userId: actorId, requestId: getRequestId() });
+      } else {
+        await payments.failOnlinePaymentIntent(input.intentReference, input.reason ?? "El proveedor rechazó el pago.");
+      }
+      await container.database.query("UPDATE payment_webhook_events SET status='PROCESSED',processed_at=UTC_TIMESTAMP(3) WHERE provider_code=? AND event_id=?", [provider, input.eventId]);
+      await recordOperation(container, request, { action: "PAYMENT_WEBHOOK_PROCESSED", module: "payments", entityType: "payment_intent", entityId: input.intentReference });
+      response.status(200).json({ data: { accepted: true }, meta: { requestId: getRequestId() } });
+    } catch (error) {
+      if (request.params.provider && request.get("x-payment-signature")) {
+        const eventId = readEventId(request.body);
+        if (eventId) await container.database.query("UPDATE payment_webhook_events SET status='REJECTED',failure_reason=? WHERE provider_code=? AND event_id=?", [error instanceof Error ? error.message : "Webhook rechazado", request.params.provider, eventId]).catch(() => undefined);
+      }
+      next(error);
+    }
+  });
+
   return router;
 }
 
@@ -225,6 +317,12 @@ async function publicInfraction(connection: Queryable, infraction: InfractionRow
     `SELECT it.code,it.name,ii.amount_snapshot FROM infraction_items ii JOIN infraction_types it ON it.id=ii.infraction_type_id WHERE ii.infraction_id=? ORDER BY ii.id`, [infraction.id],
   );
   const balance = infraction.status === "ANULADA" ? { originalAmount: infraction.total_amount, adjustmentTotal: "0.00", paymentTotal: "0.00", pendingBalance: "0.00" } : await balanceSnapshot(connection, infraction.id);
+  const payments = await queryRows<(RowDataPacket & { status: string; receipt_number: string | null; confirmed_at: Date | null })[]>(connection,
+    `SELECT p.status,pr.receipt_number,p.confirmed_at FROM payments p JOIN payment_orders po ON po.id=p.payment_order_id
+     LEFT JOIN payment_receipts pr ON pr.payment_id=p.id LEFT JOIN payment_reversals rv ON rv.payment_id=p.id
+     WHERE po.infraction_id=? AND p.status='CONFIRMED' AND rv.id IS NULL ORDER BY p.confirmed_at DESC LIMIT 1`, [infraction.id],
+  );
+  const latestPayment = payments[0];
   return {
     reference,
     ticketNumber: infraction.ticket_number,
@@ -234,6 +332,7 @@ async function publicInfraction(connection: Queryable, infraction: InfractionRow
     status: infraction.status,
     violations: items.map((item) => ({ code: item.code, name: item.name, amount: item.amount_snapshot })),
     balance: { ...balance, currency: "GTQ" },
+    payment: latestPayment ? { status: latestPayment.status, receiptNumber: latestPayment.receipt_number, confirmedAt: latestPayment.confirmed_at } : null,
     paymentOrderEligible: infraction.status === "VALIDADA" && balance.pendingBalance !== "0.00",
   };
 }
@@ -278,7 +377,11 @@ async function loadOrder(connection: Queryable, id: number): Promise<PaymentOrde
 }
 
 function orderSelect(where: string): string {
-  return `SELECT po.*,i.ticket_number,i.vehicle_plate_snapshot FROM payment_orders po JOIN infractions i ON i.id=po.infraction_id WHERE ${where}`;
+  return `SELECT po.*,i.ticket_number,i.vehicle_plate_snapshot,CASE WHEN rv.id IS NOT NULL THEN 'REVERSED' ELSE p.status END payment_status,p.public_reference payment_reference,pr.receipt_number
+          FROM payment_orders po JOIN infractions i ON i.id=po.infraction_id
+          LEFT JOIN payments p ON p.payment_order_id=po.id
+          LEFT JOIN payment_receipts pr ON pr.payment_id=p.id
+          LEFT JOIN payment_reversals rv ON rv.payment_id=p.id WHERE ${where}`;
 }
 
 function orderDto(order: PaymentOrderRow) {
@@ -295,6 +398,9 @@ function orderDto(order: PaymentOrderRow) {
     status: order.status,
     issuedAt: order.issued_at,
     expiresAt: order.expires_at,
+    paymentStatus: order.payment_status,
+    paymentReference: order.payment_reference,
+    receiptNumber: order.receipt_number,
     notice: "Esta orden facilita el pago, pero no es recibo ni acredita que la obligación haya sido pagada.",
   };
 }
@@ -315,5 +421,39 @@ async function queryRows<T extends RowDataPacket[]>(connection: Queryable, sql: 
 }
 function randomReference(): string { return randomBytes(20).toString("hex"); }
 function sha256(value: string): string { return createHash("sha256").update(value).digest("hex"); }
+function verifyWebhookSignature(payload: string, provided: string, secret: string): boolean {
+  if (!secret || !provided) return false;
+  const normalized = provided.replace(/^sha256=/i, "").trim();
+  const expected = createHmac("sha256", secret).update(payload).digest("hex");
+  if (normalized.length !== expected.length) return false;
+  return timingSafeEqual(Buffer.from(normalized), Buffer.from(expected));
+}
+function readEventId(value: unknown): string | null {
+  if (typeof value !== "object" || value === null || !("eventId" in value)) return null;
+  const eventId = (value as { eventId?: unknown }).eventId;
+  return typeof eventId === "string" ? eventId : null;
+}
+function onlineIntentDto(intent: Awaited<ReturnType<PaymentService["getOnlinePaymentIntent"]>>) {
+  return {
+    id: intent.id,
+    reference: intent.reference,
+    orderNumber: intent.orderNumber,
+    paymentOrderReference: intent.paymentOrderReference,
+    paymentMethod: intent.paymentMethod,
+    providerCode: intent.providerCode,
+    status: intent.status,
+    amount: intent.amount,
+    currency: intent.currency,
+    checkoutUrl: intent.checkoutUrl,
+    providerPaymentId: intent.providerPaymentId,
+    paymentId: intent.paymentId,
+    receiptNumber: intent.receiptNumber,
+    expiresAt: intent.expiresAt,
+    createdAt: intent.createdAt,
+    completedAt: intent.completedAt,
+    testMode: intent.testMode,
+    notice: "El pago se procesa en una página alojada; este sistema nunca solicita ni almacena datos de tarjeta.",
+  };
+}
 function publicNotFound(): HttpError { return new HttpError({ code: "PUBLIC_INFRACTION_NOT_FOUND", message: "No se encontró una infracción con los datos proporcionados.", statusCode: 404 }); }
 function publicOrderNotFound(): HttpError { return new HttpError({ code: "PUBLIC_PAYMENT_ORDER_NOT_FOUND", message: "No se encontró la orden de pago solicitada.", statusCode: 404 }); }

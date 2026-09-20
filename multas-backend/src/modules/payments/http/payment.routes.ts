@@ -132,6 +132,9 @@ export function createPaymentRouter(container: AppContainer): Router {
   router.get("/payments", authorize("payments.read", container.auditRepository), async (request, response, next) => {
     try { const input = listPayments.parse(request.query); const result = await service.listPayments(input); response.json({ data: result.items, meta: { page: input.page, pageSize: input.pageSize, total: result.total, requestId: getRequestId() } }); } catch (error) { next(error); }
   });
+  router.get("/payments/online-intents", authorize("payments.online.read", container.auditRepository), async (_request, response, next) => {
+    try { response.json({ data: await service.listOnlinePaymentIntents(), meta: { requestId: getRequestId() } }); } catch (error) { next(error); }
+  });
   router.get("/payments/:id", authorize("payments.read", container.auditRepository), async (request, response, next) => {
     try { response.json({ data: await service.getPayment(id.parse(request.params["id"])), meta: { requestId: getRequestId() } }); } catch (error) { next(error); }
   });

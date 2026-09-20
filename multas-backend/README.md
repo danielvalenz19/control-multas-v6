@@ -63,8 +63,8 @@ Los comandos administrativos requieren TTY y ocultan contraseñas. La limpieza m
 - Infracciones: borradores, múltiples artículos, evidencias privadas, envío, devolución, rechazo, validación, anulación y línea de tiempo.
 - Impugnaciones: presentación, revisión, información adicional, desistimiento, resolución, evidencia privada e historial.
 - Ajustes: descuentos, exoneraciones, recargos, correcciones, doble control y reversión por contrapartida.
-- Portal público: consulta boleta+placa, saldo exacto y órdenes idempotentes con PDF no-recibo.
-- Caja y pagos: apertura/cierre, movimientos autorizados, pago exacto contra orden vigente, confirmación, recibo/copia y reverso compensatorio.
+- Portal público: consulta boleta+placa, saldo exacto, órdenes idempotentes con PDF no-recibo y checkout alojado para tarjeta o enlace Visa.
+- Caja y pagos: apertura/cierre, movimientos autorizados, pago exacto contra orden vigente, confirmación presencial, recibo/copia, reverso compensatorio y bandeja de intentos en línea para receptoría.
 - Conciliación: lotes manuales o importados, ítems, diferencias y cierre sin pérdida de historial.
 - Solvencias: solicitud/revisión, saldo real, emisión única, PDF, revocación/observación y verificación pública sin PII.
 - Dashboard: KPIs y gráficas agregadas en MySQL con rango máximo de 366 días y filtro por dependencia.
@@ -76,6 +76,8 @@ Las evidencias usan `PRIVATE_UPLOAD_DIR` (por defecto `storage/private`) y `MAX_
 
 Los archivos históricos usan `HISTORICAL_MIGRATION_DIR`, `HISTORICAL_MIGRATION_MAX_BYTES` y `HISTORICAL_MIGRATION_RETENTION_DAYS`. Consulte `docs/MIGRACION_HISTORICA.md`; las plantillas solo contienen ejemplos sintéticos.
 
-`PUBLIC_RATE_LIMIT_WINDOW_MS` y `PUBLIC_RATE_LIMIT_MAX` controlan el límite específico del portal. Antes de emitir órdenes o solvencias, una autoridad debe configurar `PAYMENT_ORDER_EXPIRY_DAYS`, `SOLVENCY_VALIDITY_DAYS` y los correlativos del año; el sistema no inventa estos valores.
+`PUBLIC_RATE_LIMIT_WINDOW_MS` y `PUBLIC_RATE_LIMIT_MAX` controlan las consultas ciudadanas; `PUBLIC_PAYMENT_RATE_LIMIT_MAX` separa el sondeo de estado de los checkouts para que una actualización automática no bloquee la consulta principal. Antes de emitir órdenes o solvencias, una autoridad debe configurar `PAYMENT_ORDER_EXPIRY_DAYS`, `SOLVENCY_VALIDITY_DAYS` y los correlativos del año; el sistema no inventa estos valores.
+
+El flujo de pago en línea se controla con `PAYMENT_GATEWAY_MODE`: `disabled` no muestra checkout, `test` habilita únicamente la confirmación sintética QA local y `external` genera enlaces hacia el proveedor configurado en `PAYMENT_GATEWAY_BASE_URL` y acepta webhooks HMAC con `PAYMENT_GATEWAY_WEBHOOK_SECRET`. La aplicación no recibe ni almacena números de tarjeta. Para producción hace falta contratar/configurar el proveedor Visa o adquirente y adaptar su contrato de webhook a los eventos `PAYMENT_SUCCEEDED` y `PAYMENT_FAILED`.
 
 Use clientes con `credentials: include`. El token solo viaja en cookie HttpOnly; no aparece en JSON, logs ni localStorage. Consulte `docs/CONTRATO_AUTENTICACION.md` y `docs/CONTRATO_INTEGRACION_FRONTEND_AUTH.md`.

@@ -128,6 +128,22 @@ describe("clientes de la API real", () => {
     expect(String(options.body)).not.toContain("paymentMethod");
   });
 
+  it("crea un checkout de tarjeta o enlace Visa sin enviar datos de tarjeta", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      data: { reference: "d".repeat(40), paymentMethod: "VISA_LINK", status: "PENDING", checkoutUrl: "https://gateway.example/checkout" },
+      meta: { requestId: "intent-request", idempotentReplay: false },
+    }), { status: 201, headers: { "content-type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await publicApi.createPaymentIntent("b".repeat(40), "VISA_LINK", "intent-idempotency-key");
+
+    const [url, options] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain("/api/v1/public/payment-intents");
+    expect(new Headers(options.headers).get("idempotency-key")).toBe("intent-idempotency-key");
+    expect(JSON.parse(String(options.body))).toEqual({ paymentOrderReference: "b".repeat(40), paymentMethod: "VISA_LINK" });
+    expect(String(options.body)).not.toMatch(/card|cvv|pan|number/i);
+  });
+
   it("registra un pago real contra una orden con idempotencia", async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
       data: { id: "91", status: "REGISTERED", amount: "150.00" },

@@ -1,5 +1,5 @@
 import cors from "cors";
-import express, { type Express } from "express";
+import express, { type Express, type Request } from "express";
 import rateLimit from "express-rate-limit";
 import helmet from "helmet";
 import type { AppContainer } from "./bootstrap/container.js";
@@ -22,7 +22,7 @@ export function createApp(container: AppContainer): Express {
       else callback(new HttpError({ code: "CORS_ORIGIN_NOT_ALLOWED", message: "El origen no está permitido.", statusCode: 403 }));
     },
     methods: ["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "X-Request-Id", "Idempotency-Key", "X-File-Name", "X-Evidence-Type", "X-Device-Id", "X-Source-System", "X-Migration-Entity"],
+    allowedHeaders: ["Content-Type", "X-Request-Id", "Idempotency-Key", "X-File-Name", "X-Evidence-Type", "X-Device-Id", "X-Source-System", "X-Migration-Entity", "X-Payment-Signature"],
     exposedHeaders: ["X-Request-Id"],
     credentials: true,
     maxAge: 600,
@@ -37,7 +37,12 @@ export function createApp(container: AppContainer): Express {
     },
   }));
   app.use(`${container.env.API_PREFIX}/admin/historical-migrations/uploads`, express.raw({ type: ["text/csv", "application/csv", "text/plain", "application/vnd.ms-excel"], limit: container.env.HISTORICAL_MIGRATION_MAX_BYTES }));
-  app.use(express.json({ limit: container.env.BODY_LIMIT }));
+  app.use(express.json({
+    limit: container.env.BODY_LIMIT,
+    verify(request, _response, buffer) {
+      (request as Request & { rawBody?: Buffer }).rawBody = Buffer.from(buffer);
+    },
+  }));
   app.use(express.urlencoded({ extended: false, limit: container.env.BODY_LIMIT }));
   app.use(container.env.API_PREFIX, createApiRouter(container));
   app.use(outsideApiNotFoundHandler());

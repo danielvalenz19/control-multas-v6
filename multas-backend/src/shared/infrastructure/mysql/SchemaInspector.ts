@@ -54,6 +54,8 @@ const fullOnlyRequiredColumns: Record<string, readonly string[]> = {
   cash_sessions: ["id", "cash_desk_id", "cashier_user_id", "status", "opening_amount", "opened_at", "closed_at", "difference_amount"],
   cash_movements: ["id", "cash_session_id", "movement_type", "direction", "amount", "payment_id", "payment_reversal_id"],
   payments: ["id", "public_reference", "payment_order_id", "cash_session_id", "payment_method_id", "amount", "status", "confirmed_at"],
+  payment_intents: ["id", "public_reference", "payment_order_id", "payment_method_id", "provider_code", "status", "amount", "checkout_url", "expires_at", "payment_id"],
+  payment_webhook_events: ["id", "provider_code", "event_id", "payload_hash", "signature_verified", "status", "received_at"],
   payment_allocations: ["id", "payment_id", "infraction_id", "amount"],
   payment_receipts: ["id", "payment_id", "receipt_number", "issued_at", "copy_count"],
   payment_reversals: ["id", "payment_id", "amount", "reason", "authorization_reference", "reversed_at"],
@@ -92,6 +94,8 @@ export const expectedMigrations = [
   { version: "011", description: "Dashboard, reportes y notificaciones internas", scope: "full" },
   { version: "012", description: "Preferencias internas para roles con bandeja", scope: "full" },
   { version: "013", description: "Migracion historica controlada desde Access y CSV", scope: "full" },
+  { version: "014", description: "Checkout alojado, enlaces de pago y webhooks firmados", scope: "full" },
+  { version: "015", description: "Snapshot de orden pagada con saldo cero", scope: "full" },
 ] as const;
 
 export type SchemaDifference = {

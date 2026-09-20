@@ -14,7 +14,7 @@ import { theme } from "@/src/app/theme";
 import PublicLayout from "@/src/layouts/PublicLayout";
 import AdminLayout from "@/src/layouts/AdminLayout";
 import { InformationPage } from "@/src/modules/public-portal/PublicPages";
-import { FutureModulePage, PaymentOrderAccessPage, PaymentOrderPage, PublicHome, PublicLookup, PublicResultPage } from "@/src/modules/public-portal/RealPublicPages";
+import { PaymentCheckoutPage, PaymentOrderAccessPage, PaymentOrderPage, PublicHome, PublicLookup, PublicResultPage, PublicPaymentsPage } from "@/src/modules/public-portal/RealPublicPages";
 import { RecoverPasswordPage } from "@/src/modules/auth/AuthPages";
 import { LoginPage } from "@/src/modules/auth/pages/LoginPage";
 import { AuthProvider } from "@/src/modules/auth/context/AuthProvider";
@@ -109,12 +109,13 @@ export default function App() {
                 path="/consulta/resultado"
                 element={<PublicResultPage />}
               />
-              <Route path="/pagos" element={<FutureModulePage title="Pagos y recibos" />} />
+              <Route path="/pagos" element={<PublicPaymentsPage />} />
               <Route path="/orden-pago" element={<PaymentOrderAccessPage />} />
               <Route
                 path="/orden-pago/:reference"
                 element={<PaymentOrderPage />}
               />
+              <Route path="/pago/checkout/:reference" element={<PaymentCheckoutPage />} />
               <Route
                 path="/solvencia/solicitar"
                 element={<PublicSolvencyRequestInfoPage />}

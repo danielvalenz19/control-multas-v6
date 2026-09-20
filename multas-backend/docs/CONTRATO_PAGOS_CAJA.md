@@ -2,12 +2,14 @@
 
 ## Principios
 
-- Una orden `ISSUED` vigente autoriza registrar un pago, pero no acredita pago ni crea recibo.
-- Registrar crea un pago `REGISTERED`; confirmar crea el recibo y cambia la orden a `USED` en la misma transacción.
+- Una orden `ISSUED` vigente autoriza registrar un pago presencial o iniciar un intento en línea, pero no acredita pago ni crea recibo.
+- En receptoría, registrar crea un pago `REGISTERED`; confirmar crea el recibo y cambia la orden a `USED` en la misma transacción.
+- En línea, `POST /api/v1/public/payment-intents` crea un checkout de tarjeta (`CARD_ONLINE`) o un enlace (`VISA_LINK`). Un webhook HMAC `PAYMENT_SUCCEEDED` confirma atómicamente el pago y emite el recibo sin asociar turno de caja; `PAYMENT_FAILED` deja el intento rechazado sin alterar el saldo.
 - El monto debe coincidir exactamente con el saldo de la orden. No hay sobrepago, pago parcial ni pasarela simulada.
 - Todos los importes viajan como cadenas decimales, se persisten como `DECIMAL` y se calculan en centavos `bigint`.
 - Registrar, confirmar y reversar exigen `Idempotency-Key`. Los bloqueos de fila y restricciones únicas protegen contra concurrencia.
 - Un pago confirmado es inmutable. Reversar agrega una contrapartida y movimientos compensatorios.
+- Los pagos en línea no se confirman desde el formulario municipal: el portal solo redirige al proveedor y consulta el resultado. En QA local existe `/public/payment-intents/{reference}/test-confirm`, bloqueado cuando `PAYMENT_GATEWAY_MODE` no es `test`.
 
 ## Recibos
 
@@ -24,3 +26,7 @@ Los lotes pueden ser `MANUAL` o `IMPORTED`. Un origen importado conserva nombre 
 ## Saldo
 
 `saldo = monto original + ajustes aprobados - pagos confirmados + reversos`. Una orden, un pago registrado o un recibo reimpreso no alteran el saldo.
+
+## Receptoría y verificación ciudadana
+
+La bandeja protegida `GET /api/v1/payments/online-intents` permite a perfiles `ADMIN`, `SUPERVISOR` y `RECEPTORIA` revisar proveedor, monto, estado y recibo de los checkouts. El portal ciudadano refleja el cambio en la orden y en la consulta de boleta: `paymentStatus=CONFIRMED`, recibo y saldo pendiente `0.00`. La solvencia continúa siendo un trámite separado y solo debe emitirse después de que el pago confirmado cumpla sus demás requisitos institucionales.

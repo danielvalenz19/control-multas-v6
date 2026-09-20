@@ -1,6 +1,6 @@
 # Contrato de orden de pago
 
-Una orden de pago es una instrucción temporal para presentar en receptoría. No es un cobro, recibo, comprobante, aplicación de pago ni solvencia.
+Una orden de pago es una instrucción temporal para presentar en receptoría o iniciar un checkout alojado. No es un cobro, recibo, comprobante, aplicación de pago ni solvencia mientras permanezca `ISSUED`.
 
 ## Emisión
 
@@ -15,3 +15,13 @@ El acceso público usa una referencia aleatoria de 160 bits, nunca el ID consecu
 El PDF incluye número, boleta, placa, saldo snapshot, emisión, vencimiento y estado. Lleva el texto inequívoco “NO ES RECIBO PAGADO NI CONSTANCIA DE PAGO”. Se entrega con `Cache-Control: private, no-store`.
 
 La versión actual admite una infracción por orden. Agrupar infracciones queda pendiente de decisión municipal y de una migración futura, sin reinterpretar órdenes históricas.
+
+## Opciones de pago
+
+Desde `GET /api/v1/public/payment-orders/{publicReference}` el ciudadano puede:
+
+- iniciar `POST /api/v1/public/payment-intents` con `paymentMethod=CARD` para un checkout alojado de tarjeta;
+- iniciar el mismo endpoint con `paymentMethod=VISA_LINK` para generar un enlace compartible;
+- presentar la orden vigente en receptoría y solicitar que el operador registre y confirme el pago.
+
+Los dos primeros caminos crean un intento con referencia opaca, expiración e idempotencia. La municipalidad no recibe ni almacena número de tarjeta, CVV o PIN. Solo una confirmación del proveedor (webhook HMAC en modo `external`) o la confirmación sintética explícita de QA en modo `test` crea el pago, recibo, saldo cero y estado `USED`. El estado se puede consultar en `GET /api/v1/public/payment-intents/{reference}` y la orden devuelve `paymentStatus`, `paymentReference` y `receiptNumber` cuando existe.
